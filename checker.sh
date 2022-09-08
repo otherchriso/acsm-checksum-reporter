@@ -43,39 +43,7 @@ while read line; do
 
     payload='{"username": "Checksum Police", "content": "'${message}'"}'
 
-  # [[ -z ${message} ]] || echo "We WOULD send this: ${payload}"
-  [[ -z ${message} ]] || curl -s -H "Content-Type: application/json" -d "${payload}" $webhookurl
+    [[ -z ${message} ]] || curl -s -H "Content-Type: application/json" -d "${payload}" $webhookurl
   fi
   linebefore=${line}
 done
-
-# debugging
-# 
-# echo "LINE BEFORE"
-# echo ${linebefore}
-# echo ""
-# echo "KEY PART"
-# echo ${keypart}
-# echo ""
-# echo "DRIVER"
-# echo ${driver}
-# echo ""
-# echo "MESSAGE"
-# echo -e ${message}
-# echo ""
-# echo "DETAILS"
-# echo ${details}
-# echo ""
-# echo "CONTENT TYPE"
-# echo ${contenttype}
-# echo ""
-# echo "CONTENT NAME"
-# echo ${contentname}
-# echo ""
-# echo "HINT FILE"
-# echo ${hintfile}
-# echo ""
-# echo "DOWNLOADURL"
-# echo ${downloadurl}
-# echo ""
-
