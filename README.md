@@ -4,6 +4,10 @@ This repo is a set of scripts which solves the following use case:
 
 When someone joins an Assetto Corsa Server Manager server and receives a checksum failure, a message telling everyone the name of the driver and the cause of the checksum failure is sent to a specific Discord server via webhook.
 
+
+![example](https://user-images.githubusercontent.com/77416784/189126614-e4ae5e0d-c53f-4432-8caf-4c618ea190cd.png)
+
+
 ## Assumed pre-requisites
 
 1. A relatively modern Linux-based environment
