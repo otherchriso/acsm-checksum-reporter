@@ -1,0 +1,19 @@
+[Unit]
+Description=Start ACSM Checksum failure announcer bot
+After=network.target
+# Optional: delay starting this service until ACSM itself is up
+After=ac-server-manager.service
+Wants=network-online.target
+
+[Service]
+Restart=always
+Type=simple
+KillSignal=SIGINT
+# Adjust User, Group, ExecStart and WorkingDirectory to suit 
+ExecStart=/home/acsm/checksum-watchdog/checksum-manager.sh
+WorkingDirectory=/home/acsm/checksum-watchdog
+User=acsm
+Group=acsm
+
+[Install]
+WantedBy=multi-user.target
