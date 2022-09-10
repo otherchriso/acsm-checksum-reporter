@@ -40,3 +40,12 @@ The `latest-linker.sh` child script will poll for log files changing, indicating
 
 Those `checker.sh` scripts read every line, and when one is found matching the pattern of someone being checksum-kicked, that line and the one before it are parsed. The relevant info is then transmitted to a webhook endpoint.
 
+## Potential roadmap
+
+* Some error handling so things aren't as optimistic and brittle as they are now
+* Add single server support (server-manager, not just assetto-multiserver-manager)
+* Add multiple instance support (one script controlling multiple installations on same host)
+
+## Further in the future
+
+* Abstract the checksum use case to be just one a switchable set of log-parsing tricks
