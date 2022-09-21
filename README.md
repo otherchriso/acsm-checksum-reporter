@@ -19,11 +19,12 @@ When someone joins an [Assetto Corsa Server Manager](https://emperorservers.com/
 It is recommended to install the system as the same user that ACSM runs as.
 
 1. Create a directory somewhere on the same host as the ACSM installation, and unpack this repo's files there.
-2. Copy the `.secrets.example` file as `.secrets`
-3. `chmod 640 .secrets`
-4. Edit `.secrets` to specify the webhook URL you want to deliver messages to.
+2. Make the scripts executable with something like `chmod 750 *.sh`
+3. Copy the `.secrets.example` file as `.secrets`
+4. Make the file a little private with something like `chmod 640 .secrets`
+5. Edit `.secrets` to specify the webhook URL you want to deliver messages to.
 6. Copy the `checksum.env.example` file as `checksum.env`
-7. `chmod 640 checksum.env`
+7. Make the file a little private with something like `chmod 640 checksum.env`
 8. Edit `checksum.env` to specify the path to your uploaded content directory, and the directory above your ACSM multiservers.
 
 ### Optional - systemd service
