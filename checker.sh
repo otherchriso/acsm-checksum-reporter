@@ -15,14 +15,6 @@ while read line; do
     # which would be super dooper unlikely but still...
     keypart=$(echo ${linebefore} | awk -F '"' '{print $2".*"$4}' | sed "s/'/\.*/g" | sed 's/[-+]..:../\.*/' )
 
-    message=$(egrep -A1 "${keypart}" ${watchedlog} \
-              | sed -z 's/\n/|/' \
-              | awk -F '"' '{print $4,$8}' \
-              | sed -e "s/.*\(content[^']*\).*\(Name:[^,]*\),.*/\"\1\" \"\2\"/" \
-              | sed "s/Name: //    " \
-              | awk -F'"' '{print "Checksum failed for",$4,"on",$2}' \
-              | sed 's|content/[^\/]*\/\([^\/]*\)/.*|\1|')
-
     details=$(egrep -A1 "${keypart}" ${watchedlog} \
               | sed -z 's/\n/|/' \
               | awk -F '"' '{print $4,$8}' )
@@ -40,7 +32,7 @@ while read line; do
 
 
     # Initialise the message 
-    message=":racing_car: :police_car: :racing_car: :police_car: :racing_car: :police_car:\n"
+    message="${message_prefix}\n"
 
     # Who, what, where
     message="${message}\nChecksum failed for **"${driver}"** on "${contenttype}" **"${contentname}"**"
@@ -92,15 +84,15 @@ while read line; do
     notes=${revised_line}
 
     [[ ${#downloadurl} -gt 5 ]] \
-    && message="${message}\n\n**Content download:**\n<${downloadurl}>\n\nIf that does not work, the server's version is possibly out of date.\nAdmins are watching and will fix that asap.\n" \
+    && message="${message}\n\n**Content download:**\n<${downloadurl}>\n" \
     || message="${message}\n\nWe don't have a download link for that.\nIf the content is stock or DLC, make sure you own it, and verify your game files in Steam.\n"
 
-   [[ ${#notes} -gt 3 ]] \
+    [[ ${#notes} -gt 3 ]] \
     && message="${message}\n**Important notes:**\n${notes}" \
-    || # no notes
+    || /bin/true
 
 
-    message="$(echo ${message} | sed 's|\^||g')"
+    message="${message}\n${message_suffix}"
 
     payload='{"username": "'${bot_name}'", "content": "'${message}'"}'
 
