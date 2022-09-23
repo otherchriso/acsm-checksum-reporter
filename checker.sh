@@ -27,23 +27,81 @@ while read line; do
               | sed -z 's/\n/|/' \
               | awk -F '"' '{print $4,$8}' )
 
-    driver=$(echo $details | egrep -o 'Name[^,]*' | sed 's/Name: //')
-    contenttype=$(echo $details | awk -F'/' '{print $2}' | sed 's/s//')
-    contentname=$(echo $details | awk -F'/' '{print $3}')
+    driver=$(echo $details \
+             | egrep -o 'Name[^,]*' \
+             | sed 's/Name: //')
 
-    message=":police_car: :police_car: :police_car: :police_car: :police_car: :police_car: :police_car: :police_car: :police_car: :police_car: \nChecksum failed for **"${driver}"** on "${contenttype}" **"${contentname}"**"
+    contenttype=$(echo $details \
+                  | awk -F'/' '{print $2}' \
+                  | sed 's/s//')
 
+    contentname=$(echo $details \
+                  | awk -F'/' '{print $3}')
+
+
+    # Initialise the message 
+    message=":racing_car: :police_car: :racing_car: :police_car: :racing_car: :police_car:\n"
+
+    # Who, what, where
+    message="${message}\nChecksum failed for **"${driver}"** on "${contenttype}" **"${contentname}"**"
+
+    # Now for some more info
     [[ ${contenttype} == "track" ]] && hintfile="${contentpath}${contenttype}s/${contentname}/ui/meta_data.json"
     [[ ${contenttype} == "car" ]] && hintfile="${contentpath}${contenttype}s/${contentname}/ui/ui_car.json"
     downloadurl=$(jq -r .downloadURL ${hintfile})
+#    notes=$(jq -r .notes ${hintfile} | sed "s|\"|'|g" | sed 's|<br>|\\n|g' | sed 's|<p>|\\n|g' | sed 's|</p>|\\n|g' | sed 's|<[^>]*>||g')
+
+    # Check for any notes about this content.
+    # This is a rich text field, so... there be dragons.
+    # Since Discord somehow can't handle hyperlinks which the WWW has had since 1988
+    # we will convert links to "__text__ _(title)_" format, 
+    # then create some line breaks, and strip as much other HTML as we can
+    notes=$(jq -r .notes ${hintfile} \
+    | sed 's|<a href="\([^"]*\)"[^>]*>\([^<]*\)</a>|__\2__ _(#@!\1!@#)_|g' \
+    | sed "s|\"|'|g" \
+    | sed 's|<br>|\\n|g' \
+    | sed 's|<p>|\\n|g' \
+    | sed 's|</p>|\\n|g' \
+    | sed 's|<[^>]*>||g' \
+    | sed 's|&nbsp;| |g' \
+    | sed 's|#@!|<|g' \
+    | sed 's|!@#|>|g')
+
+    # stash this in a variable we are about to manipulate
+    revised_line=${notes}
+
+    for word in $(echo ${notes}); do
+      # store any occurence of http[^ ]* into a variable "link"
+      link=$(echo $word \
+               | egrep -o 'http.*' \
+               | sed 's|\\n$||' \
+               | sed 's|__$||')
+      # it is likely long URIs are sometimes hyperlinked as themselves in the notes
+      # making for an extremely ugly presentation in Discord
+      # referencing the formatting we built into the $notes definition above...
+      # replace any occurrences of "__link__ _(link)_" with simply "link"
+      revised_line=$(echo ${revised_line} \
+                     | sed "s|__${link}__ _.<${link}>._|<${link}>|g")
+    done
+
+    # Now that we have cleaned up any egregious links
+    # let's update that main notes variable
+    notes=${revised_line}
 
     [[ ${#downloadurl} -gt 5 ]] \
-    && message="${message}\nTry a fresh download from:\n${downloadurl}\n\nIf that does not work it is probably the server's copy which is out of date.\nAdmins are watching and will fix that asap." \
-    || message="${message}\n\nWe don't have a download link for that.\nIf the content is stock or DLC, make sure you own it, and verify your game files in Steam."
+    && message="${message}\n\n**Content download:**\n<${downloadurl}>\n\nIf that does not work, the server's version is possibly out of date.\nAdmins are watching and will fix that asap.\n" \
+    || message="${message}\n\nWe don't have a download link for that.\nIf the content is stock or DLC, make sure you own it, and verify your game files in Steam.\n"
 
-    payload='{"username": "Checksum Police", "content": "'${message}'"}'
+   [[ ${#notes} -gt 0 ]] \
+    && message="${message}\n**Important notes:**\n${notes}" \
+    || # no notes
 
-    [[ -z ${message} ]] || curl -s -H "Content-Type: application/json" -d "${payload}" $webhookurl
+
+    message="$(echo ${message} | sed 's|\^||g')"
+
+    payload='{"username": "'${bot_name}'", "content": "'${message}'"}'
+
+  [[ -z ${message} ]] || curl -s -H "Content-Type: application/json" -d "${payload}" $webhookurl
   fi
   linebefore=${line}
 done
