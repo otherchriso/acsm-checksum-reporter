@@ -67,6 +67,9 @@ while read line; do
     | sed 's|#@!|<|g' \
     | sed 's|!@#|>|g')
 
+    # sometimes an empty save results in "<p><br></p>" so let's deal with that
+    [[ "${notes}" == "\n\n\n" ]] && notes=""
+
     # stash this in a variable we are about to manipulate
     revised_line=${notes}
 
@@ -92,7 +95,7 @@ while read line; do
     && message="${message}\n\n**Content download:**\n<${downloadurl}>\n\nIf that does not work, the server's version is possibly out of date.\nAdmins are watching and will fix that asap.\n" \
     || message="${message}\n\nWe don't have a download link for that.\nIf the content is stock or DLC, make sure you own it, and verify your game files in Steam.\n"
 
-   [[ ${#notes} -gt 0 ]] \
+   [[ ${#notes} -gt 3 ]] \
     && message="${message}\n**Important notes:**\n${notes}" \
     || # no notes
 
