@@ -49,15 +49,21 @@ while read line; do
     # we will convert links to "__text__ _(title)_" format, 
     # then create some line breaks, and strip as much other HTML as we can
     notes=$(jq -r .notes ${hintfile} \
+    | tr '\r\n' ' ' \
     | sed 's|<a href="\([^"]*\)"[^>]*>\([^<]*\)</a>|__\2__ _(#@!\1!@#)_|g' \
     | sed "s|\"|'|g" \
     | sed 's|<br>|\\n|g' \
     | sed 's|<p>|\\n|g' \
     | sed 's|</p>|\\n|g' \
+    | sed 's|<ul>|\\n|g' \
+    | sed 's|<li>|• |g' \
+    | sed 's|</li>|\\n|g' \
     | sed 's|<[^>]*>||g' \
     | sed 's|&nbsp;| |g' \
     | sed 's|#@!|<|g' \
-    | sed 's|!@#|>|g')
+    | sed 's|!@#|>|g' \
+    | sed 's|\\|\\\\|g' \
+    | sed 's|\\\\n|\\n|g' )
 
     # sometimes an empty save results in "<p><br></p>" so let's deal with that
     [[ "${notes}" == "\n\n\n" ]] && notes=""
