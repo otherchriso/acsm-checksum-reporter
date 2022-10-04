@@ -43,6 +43,13 @@ while read line; do
     downloadurl=$(jq -r .downloadURL ${hintfile})
 #    notes=$(jq -r .notes ${hintfile} | sed "s|\"|'|g" | sed 's|<br>|\\n|g' | sed 's|<p>|\\n|g' | sed 's|</p>|\\n|g' | sed 's|<[^>]*>||g')
 
+
+    # Is this content part of a DLC pack?
+    dlc="$(jq -r .${contentname} dlc)"
+    [[ ${#dlc} -gt 5 ]] \
+    && message="${message}\n\n${contentname} is available with the **${dlc}** DLC." \
+    || /bin/true
+
     # Check for any notes about this content.
     # This is a rich text field, so... there be dragons.
     # Since Discord somehow can't handle hyperlinks which the WWW has had since 1988
@@ -91,7 +98,7 @@ while read line; do
 
     [[ ${#downloadurl} -gt 5 ]] \
     && message="${message}\n\n**Content download:**\n<${downloadurl}>\n" \
-    || message="${message}\n\nWe don't have a download link for that.\nIf the content is stock or DLC, make sure you own it, and verify your game files in Steam.\n"
+    || message="${message}\n\nWe don't have a download link for that. If the content is stock or DLC, make sure you have installed it, and verify your game files in Steam.\n"
 
     [[ ${#notes} -gt 3 ]] \
     && message="${message}\n**Important notes:**\n${notes}" \
