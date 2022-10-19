@@ -40,7 +40,7 @@ while read line; do
     # Now for some more info
     [[ ${contenttype} == "track" ]] && hintfile="${contentpath}${contenttype}s/${contentname}/ui/meta_data.json"
     [[ ${contenttype} == "car" ]] && hintfile="${contentpath}${contenttype}s/${contentname}/ui/ui_car.json"
-    downloadurl=$(jq -r .downloadURL ${hintfile})
+    downloadurl=$(jq -r .downloadURL ${hintfile} | xargs)
 
     # Is this content part of a DLC pack?
     dlc="$(jq -r .${contentname} dlc)"
