@@ -41,8 +41,6 @@ while read line; do
     [[ ${contenttype} == "track" ]] && hintfile="${contentpath}${contenttype}s/${contentname}/ui/meta_data.json"
     [[ ${contenttype} == "car" ]] && hintfile="${contentpath}${contenttype}s/${contentname}/ui/ui_car.json"
     downloadurl=$(jq -r .downloadURL ${hintfile})
-#    notes=$(jq -r .notes ${hintfile} | sed "s|\"|'|g" | sed 's|<br>|\\n|g' | sed 's|<p>|\\n|g' | sed 's|</p>|\\n|g' | sed 's|<[^>]*>||g')
-
 
     # Is this content part of a DLC pack?
     dlc="$(jq -r .${contentname} dlc)"
