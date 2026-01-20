@@ -3,6 +3,11 @@
 source checksum.env
 source .secrets
 
+if ! command -v jq &> /dev/null; then
+  echo "Error: jq is required but not installed." >&2
+  exit 1
+fi
+
 watchedlog=${1}
 
 tail -Fn0 "${watchedlog}" 2>&1 | \
