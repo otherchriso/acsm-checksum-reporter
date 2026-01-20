@@ -70,127 +70,176 @@ if [[ ! -r "${watchedlog}" ]]; then
   exit 1
 fi
 
+# Send a message to the Discord webhook
+# Arguments: $1 = message, $2 = context for error logging
+send_webhook() {
+  local message="${1}"
+  local context="${2}"
+  local payload='{"username": "'${bot_name}'", "content": "'${message}'"}'
+
+  if [[ -n "${message}" ]]; then
+    if ! curl -sf -H "Content-Type: application/json" -d "${payload}" "${webhookurl}"; then
+      echo "Warning: Failed to send webhook notification for ${context}" >&2
+    fi
+  fi
+}
+
+# Prepare message for checksum validation failure
+# Arguments: $1 = line before the trigger, $2 = watchedlog path
+# Outputs: message via echo
+prepare_checksum_message() {
+  local linebefore="${1}"
+  local watchedlog="${2}"
+  local message=""
+
+  # this assumes we didn't unluckily land halfway through a kicking 
+  # which would be super dooper unlikely but still...
+  local keypart=$(echo "${linebefore}" | awk -F '"' '{print $2".*"$4}' | sed "s/'/.*/g" | sed 's/[-+]..:../.*/') 
+
+  local details=$(egrep -A1 "${keypart}" "${watchedlog}" \
+            | sed -z 's/\n/|/' \
+            | awk -F '"' '{print $4,$8}' )
+
+  local driver=$(echo "${details}" \
+           | egrep -o 'Name[^,]*' \
+           | sed 's/Name: //')
+
+  local contenttype=$(echo "${details}" \
+                | awk -F'/' '{print $2}' \
+                | sed 's/s//')
+
+  local contentname=$(echo "${details}" \
+                | awk -F'/' '{print $3}')
+
+  # Initialise the message 
+  message="${message_prefix}\n"
+
+  # Who, what, where
+  message="${message}\nChecksum failed for **${driver}** on ${contenttype} **${contentname}**"
+
+  # Now for some more info
+  local hintfile=""
+  [[ ${contenttype} == "track" ]] && hintfile="${contentpath}${contenttype}s/${contentname}/ui/meta_data.json"
+  [[ ${contenttype} == "car" ]] && hintfile="${contentpath}${contenttype}s/${contentname}/ui/ui_car.json"
+  
+  # Check if hintfile exists before reading
+  local downloadurl=""
+  if [[ -f "${hintfile}" ]]; then
+    downloadurl=$(jq -r .downloadURL "${hintfile}" | xargs)
+  fi
+
+  # Is this content part of a DLC pack?
+  local dlc=""
+  if [[ -f dlc ]]; then
+    dlc="$(jq -r ".${contentname}" dlc)"
+  fi
+  [[ ${#dlc} -gt 5 ]] \
+  && message="${message}\n\n${contentname} is available with the **${dlc}** DLC." \
+  || /bin/true
+
+  # Check for any notes about this content.
+  # This is a rich text field, so... there be dragons.
+  # Since Discord somehow can't handle hyperlinks which the WWW has had since 1988
+  # we will convert links to "__text__ _(title)_" format, 
+  # then create some line breaks, and strip as much other HTML as we can
+  local notes=""
+  if [[ -f "${hintfile}" ]]; then
+    notes=$(jq -r .notes "${hintfile}" \
+    | tr '\r\n' ' ' \
+    | sed 's|<a href="\([^"]*\)"[^>]*>\([^<]*\)</a>|__\2__ _(#@!\1!@#)_|g' \
+    | sed "s|\"|'|g" \
+    | sed 's|<br>|\\n|g' \
+    | sed 's|<p>|\\n|g' \
+    | sed 's|</p>|\\n|g' \
+    | sed 's|<ul>|\\n|g' \
+    | sed 's|<li>|• |g' \
+    | sed 's|</li>|\\n|g' \
+    | sed 's|<[^>]*>||g' \
+    | sed 's|&nbsp;| |g' \
+    | sed 's|#@!|<|g' \
+    | sed 's|!@#|>|g' \
+    | sed 's|\\|\\\\|g' \
+    | sed 's|\\\\n|\\n|g' )
+  fi
+
+  # sometimes an empty save results in "<p><br></p>" so let's deal with that
+  [[ "${notes}" == "\n\n\n" ]] && notes=""
+
+  # stash this in a variable we are about to manipulate
+  local revised_line="${notes}"
+
+  for word in $(echo "${notes}"); do
+    # store any occurence of http[^ ]* into a variable "link"
+    local link=$(echo "${word}" \
+             | egrep -o 'http.*' \
+             | sed 's|\\n$||' \
+             | sed 's|__$||')
+    # it is likely long URIs are sometimes hyperlinked as themselves in the notes
+    # making for an extremely ugly presentation in Discord
+    # referencing the formatting we built into the $notes definition above...
+    # replace any occurrences of "__link__ _(link)_" with simply "link"
+    revised_line=$(echo "${revised_line}" \
+                   | sed "s|__${link}__ _.<${link}>._|<${link}>|g")
+  done
+
+  # Now that we have cleaned up any egregious links
+  # let's update that main notes variable
+  notes="${revised_line}"
+
+  [[ ${#downloadurl} -gt 5 ]] \
+  && message="${message}\n\n**Content download:**\n<${downloadurl}>\n" \
+  || message="${message}\n\nWe don't have a download link for that. If the content is stock or DLC, make sure you have installed it, and verify your game files in Steam.\n"
+
+  [[ ${#notes} -gt 3 ]] \
+  && message="${message}\n**Important notes:**\n${notes}" \
+  || /bin/true
+
+  message="${message}\n${message_suffix}"
+
+  # Return the message and context (driver on contentname)
+  echo "${message}|${driver} on ${contentname}"
+}
+
+# Prepare message for session closed rejection
+# Arguments: $1 = the log line containing the rejection
+# Outputs: message via echo
+prepare_session_closed_message() {
+  local logline="${1}"
+  local message=""
+
+  # Extract driver name from: Driver: John Smith (76561198012345678) tried to join
+  local driver=$(echo "${logline}" | sed -n 's/.*Driver: \([^(]*\)(.*/\1/p' | xargs)
+
+  # Initialise the message 
+  message="${message_prefix}\n"
+
+  message="${message}\nJoining was blocked for **${driver}** because the current session is closed. \n\nDepending on the server configuration, it _might_ be possible to join when the session ends, e.g. after qualifying but before the race."
+
+  message="${message}\n${message_suffix}"
+
+  # Return the message and context
+  echo "${message}|${driver} (session closed)"
+}
+
 tail -Fn0 "${watchedlog}" 2>&1 | \
 while read -r line; do
 
-  # we see the second line with reason: Checksum failed
-  if [[ $(echo "${line}" | egrep -c 'Kicking.*Checksum failed') -gt 0 ]]
-  then
-    # this assumes we didn't unluckily land halfway through a kicking 
-    # which would be super dooper unlikely but still...
-    keypart=$(echo "${linebefore}" | awk -F '"' '{print $2".*"$4}' | sed "s/'/.*/g" | sed 's/[-+]..:../.*/') 
+  message=""
 
-    details=$(egrep -A1 "${keypart}" "${watchedlog}" \
-              | sed -z 's/\n/|/' \
-              | awk -F '"' '{print $4,$8}' )
+  # Detection: Checksum validation failure
+  if [[ $(echo "${line}" | egrep -c 'Kicking.*Checksum failed') -gt 0 ]]; then
+    result=$(prepare_checksum_message "${linebefore}" "${watchedlog}")
+    message="${result%|*}"
+    context="${result#*|}"
+    send_webhook "${message}" "${context}"
 
-    driver=$(echo "${details}" \
-             | egrep -o 'Name[^,]*' \
-             | sed 's/Name: //')
-
-    contenttype=$(echo "${details}" \
-                  | awk -F'/' '{print $2}' \
-                  | sed 's/s//')
-
-    contentname=$(echo "${details}" \
-                  | awk -F'/' '{print $3}')
-
-
-    # Initialise the message 
-    message="${message_prefix}\n"
-
-    # Who, what, where
-    message="${message}\nChecksum failed for **"${driver}"** on "${contenttype}" **"${contentname}"**"
-
-    # Now for some more info
-    [[ ${contenttype} == "track" ]] && hintfile="${contentpath}${contenttype}s/${contentname}/ui/meta_data.json"
-    [[ ${contenttype} == "car" ]] && hintfile="${contentpath}${contenttype}s/${contentname}/ui/ui_car.json"
-    
-    # Check if hintfile exists before reading
-    if [[ -f "${hintfile}" ]]; then
-      downloadurl=$(jq -r .downloadURL "${hintfile}" | xargs)
-    else
-      downloadurl=""
-    fi
-
-    # Is this content part of a DLC pack?
-    if [[ -f dlc ]]; then
-      dlc="$(jq -r .${contentname} dlc)"
-    else
-      dlc=""
-    fi
-    [[ ${#dlc} -gt 5 ]] \
-    && message="${message}\n\n${contentname} is available with the **${dlc}** DLC." \
-    || /bin/true
-
-    # Check for any notes about this content.
-    # This is a rich text field, so... there be dragons.
-    # Since Discord somehow can't handle hyperlinks which the WWW has had since 1988
-    # we will convert links to "__text__ _(title)_" format, 
-    # then create some line breaks, and strip as much other HTML as we can
-    if [[ -f "${hintfile}" ]]; then
-      notes=$(jq -r .notes "${hintfile}" \
-      | tr '\r\n' ' ' \
-      | sed 's|<a href="\([^"]*\)"[^>]*>\([^<]*\)</a>|__\2__ _(#@!\1!@#)_|g' \
-      | sed "s|\"|'|g" \
-      | sed 's|<br>|\\n|g' \
-      | sed 's|<p>|\\n|g' \
-      | sed 's|</p>|\\n|g' \
-      | sed 's|<ul>|\\n|g' \
-      | sed 's|<li>|• |g' \
-      | sed 's|</li>|\\n|g' \
-      | sed 's|<[^>]*>||g' \
-      | sed 's|&nbsp;| |g' \
-      | sed 's|#@!|<|g' \
-      | sed 's|!@#|>|g' \
-      | sed 's|\\|\\\\|g' \
-      | sed 's|\\\\n|\\n|g' )
-    else
-      notes=""
-    fi
-
-    # sometimes an empty save results in "<p><br></p>" so let's deal with that
-    [[ "${notes}" == "\n\n\n" ]] && notes=""
-
-    # stash this in a variable we are about to manipulate
-    revised_line="${notes}"
-
-    for word in $(echo "${notes}"); do
-      # store any occurence of http[^ ]* into a variable "link"
-      link=$(echo "${word}" \
-               | egrep -o 'http.*' \
-               | sed 's|\\n$||' \
-               | sed 's|__$||')
-      # it is likely long URIs are sometimes hyperlinked as themselves in the notes
-      # making for an extremely ugly presentation in Discord
-      # referencing the formatting we built into the $notes definition above...
-      # replace any occurrences of "__link__ _(link)_" with simply "link"
-      revised_line=$(echo "${revised_line}" \
-                     | sed "s|__${link}__ _.<${link}>._|<${link}>|g")
-    done
-
-    # Now that we have cleaned up any egregious links
-    # let's update that main notes variable
-    notes="${revised_line}"
-
-    [[ ${#downloadurl} -gt 5 ]] \
-    && message="${message}\n\n**Content download:**\n<${downloadurl}>\n" \
-    || message="${message}\n\nWe don't have a download link for that. If the content is stock or DLC, make sure you have installed it, and verify your game files in Steam.\n"
-
-    [[ ${#notes} -gt 3 ]] \
-    && message="${message}\n**Important notes:**\n${notes}" \
-    || /bin/true
-
-
-    message="${message}\n${message_suffix}"
-
-    payload='{"username": "'${bot_name}'", "content": "'${message}'"}'
-
-    if [[ -n "${message}" ]]; then
-      if ! curl -sf -H "Content-Type: application/json" -d "${payload}" "${webhookurl}"; then
-        echo "Warning: Failed to send webhook notification for ${driver} on ${contentname}" >&2
-      fi
-    fi
+  # Detection: Session closed rejection
+  elif [[ $(echo "${line}" | egrep -c 'tried to join but was rejected as current session is closed') -gt 0 ]]; then
+    result=$(prepare_session_closed_message "${line}")
+    message="${result%|*}"
+    context="${result#*|}"
+    send_webhook "${message}" "${context}"
   fi
+
   linebefore="${line}"
 done
