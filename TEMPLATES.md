@@ -149,7 +149,7 @@ You can use custom emojis uploaded to your Discord server in templates. The synt
 <:emoji_name:emoji_id>
 ```
 
-To find the emoji ID, type `\:emoji_name:` in any Discord channel (with the backslash). Discord will display the full reference like `<:deal_with_it:1017269073622601729>`.
+To find the emoji ID, type `\:my_custom_emoji:` in any Discord channel (with the backslash). Discord will display the full reference like `<:my_custom_emoji:1017269073622601729>`.
 
 Use that exact string in your template:
 
