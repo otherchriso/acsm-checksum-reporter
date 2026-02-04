@@ -41,12 +41,13 @@ The `latest-linker.sh` child script will poll for log files changing, indicating
 
 Those `checker.sh` scripts read every line, and when one is found matching the pattern of someone being checksum-kicked, that line and the one before it are parsed. The relevant info is then transmitted to a webhook endpoint.
 
-## Potential roadmap
+## Customising Messages
 
-* Some error handling so things aren't as optimistic and brittle as they are now
-* Add single server support (server-manager, not just assetto-multiserver-manager)
-* Add multiple instance support (one script controlling multiple installations on same host)
+Discord notifications are fully customisable via template files. You can translate messages, change formatting, or add/remove information without editing the scripts.
 
-## Further in the future
+See [TEMPLATES.md](TEMPLATES.md) for the complete guide.
 
-* Abstract the checksum use case to be just one a switchable set of log-parsing tricks
+## Not yet supported
+
+* Single server support (server-manager, not just assetto-multiserver-manager)
+* Multiple instance support (one script controlling multiple installations on same host)
