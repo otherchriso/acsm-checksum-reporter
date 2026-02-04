@@ -1,6 +1,17 @@
 :warning: **Checksum Mismatch Detected**
 
 Checksum failed for **{{ .driver }}** on {{ .contentType }} **{{ .contentName }}**
+{{ if .customName }}
+
+:wrench: **Required mod:** {{ .customName }}
+{{ end }}
+{{ if .failedFile }}
+
+:file_folder: **File:** `{{ .failedFile }}`
+{{ if .expectedChecksum }}
+:hash: **Expected checksum:** `{{ .expectedChecksum }}`
+{{ end }}
+{{ end }}
 {{ if .dlcPack }}
 
 :package: {{ .contentName }} is available with the **{{ .dlcPack }}** DLC.

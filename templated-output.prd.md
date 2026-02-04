@@ -184,19 +184,19 @@ We don't have a download link. If this is stock/DLC content, verify your game fi
 3. ✅ Migrate all `prepare_*_message()` functions to use templates
 4. ✅ Deprecate `message_prefix` / `message_suffix` (keep as fallback initially)
 
-### Phase 2: Extended Variables
+### Phase 2: Extended Variables ✅ COMPLETE
 
-1. Parse `failedFile` from checksum warning log line
-2. Implement `expectedChecksum` lookup from content metadata
+1. ✅ Parse `failedFile` from checksum warning log line
+2. ✅ Implement `expectedChecksum` lookup from content metadata
    - Read `.checksums` array from `ui_car.json` or `meta_data.json`
    - Match `filepath` against `failedFile`
    - Return corresponding `checksum` value
    - Handle missing entries gracefully (empty string)
-3. Implement custom checksum lookup for non-content files
+3. ✅ Implement custom checksum lookup for non-content files
    - Add `acsm_config_path` to `checksum.env` (path to ACSM's config.yml)
    - Parse `shared_data_path:` from config.yml (or default to `shared_store.json/`)
    - Look up `failedFile` in `custom_checksums.json`
-4. Expose `{{ .customName }}` variable for custom checksums (e.g. "Helicorsa", "Custom Shaders Patch")
+4. ✅ Expose `{{ .customName }}` variable for custom checksums (e.g. "Helicorsa", "Custom Shaders Patch")
 
 ### Phase 3: Advanced Conditionals
 
