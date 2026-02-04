@@ -138,3 +138,23 @@ Validation checks for:
 ## Legacy Mode
 
 If the `templates/` directory doesn't exist, the system falls back to a basic hardcoded message format. This ensures the script continues to function even without templates, though you'll lose customisation capabilities.
+
+---
+
+## Tip: Using Custom Discord Emojis
+
+You can use custom emojis uploaded to your Discord server in templates. The syntax is:
+
+```
+<:emoji_name:emoji_id>
+```
+
+To find the emoji ID, type `\:emoji_name:` in any Discord channel (with the backslash). Discord will display the full reference like `<:deal_with_it:1017269073622601729>`.
+
+Use that exact string in your template:
+
+```
+<:my_custom_emoji:1234567890123456789> **Checksum Mismatch Detected**
+```
+
+This only works for emojis the webhook has access to—typically those uploaded to the same server the webhook posts to.
