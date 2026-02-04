@@ -77,6 +77,76 @@ fi
 # Template directory (default: ./templates)
 templates_path="${templates_path:-./templates}"
 
+# Validate template syntax
+# Arguments: $1 = template file path
+# Returns: 0 if valid, 1 if errors found (errors printed to stderr)
+validate_template_syntax() {
+  local template_file="${1}"
+  local errors=0
+  
+  if [[ ! -f "${template_file}" ]]; then
+    echo "Error: Template file '${template_file}' not found" >&2
+    return 1
+  fi
+  
+  local content=$(cat "${template_file}")
+  
+  # Check for balanced {{ and }}
+  local open_count=$(echo "${content}" | grep -o '{{' | wc -l)
+  local close_count=$(echo "${content}" | grep -o '}}' | wc -l)
+  if [[ "${open_count}" -ne "${close_count}" ]]; then
+    echo "Error: Unbalanced {{ }} in ${template_file} (${open_count} open, ${close_count} close)" >&2
+    errors=1
+  fi
+  
+  # Check for unclosed if blocks (count {{ if vs {{ end }})
+  local if_count=$(echo "${content}" | grep -oE '\{\{ if ' | wc -l)
+  local end_count=$(echo "${content}" | grep -oE '\{\{ end \}\}' | wc -l)
+  if [[ "${if_count}" -ne "${end_count}" ]]; then
+    echo "Error: Mismatched if/end blocks in ${template_file} (${if_count} if, ${end_count} end)" >&2
+    errors=1
+  fi
+  
+  # Check for include directives pointing to missing files
+  local includes=$(echo "${content}" | grep -oE '\{\{ include "[^"]*" \}\}' | sed 's/{{ include "//g' | sed 's/" }}//g')
+  for inc in ${includes}; do
+    if [[ ! -f "${templates_path}/${inc}" ]]; then
+      echo "Error: Included template '${inc}' not found in ${template_file}" >&2
+      errors=1
+    fi
+  done
+  
+  return ${errors}
+}
+
+# Validate all templates on startup
+# Returns: 0 if all valid, 1 if any errors (continues checking all templates)
+validate_templates() {
+  local errors=0
+  
+  if [[ ! -d "${templates_path}" ]]; then
+    # Templates directory doesn't exist - using legacy mode
+    return 0
+  fi
+  
+  for tmpl in "${templates_path}"/*.tmpl; do
+    if [[ -f "${tmpl}" ]]; then
+      if ! validate_template_syntax "${tmpl}"; then
+        errors=1
+      fi
+    fi
+  done
+  
+  if [[ "${errors}" -ne 0 ]]; then
+    echo "Warning: Template validation found errors. Messages may not render correctly." >&2
+  fi
+  
+  return ${errors}
+}
+
+# Validate templates at startup (non-fatal - just warns)
+validate_templates
+
 # Resolve the shared store path from ACSM config
 # Returns: path to shared store directory (without trailing slash)
 resolve_shared_store_path() {
@@ -156,6 +226,27 @@ render_template() {
   fi
   
   local template=$(cat "${template_file}")
+  
+  # Process {{ include "filename.tmpl" }} directives
+  # Use a loop to handle nested includes (max 10 iterations to prevent infinite loops)
+  local include_iterations=0
+  while [[ "${template}" =~ \{\{\ include\ \"([^\"]+)\"\ \}\} && ${include_iterations} -lt 10 ]]; do
+    local include_match="${BASH_REMATCH[0]}"
+    local include_file="${BASH_REMATCH[1]}"
+    local include_path="${templates_path}/${include_file}"
+    
+    if [[ -f "${include_path}" ]]; then
+      local include_content=$(cat "${include_path}")
+      # Escape special characters for sed replacement
+      include_content=$(echo "${include_content}" | sed 's/[&/\]/\\&/g')
+      template=$(echo "${template}" | sed "s|{{ include \"${include_file}\" }}|${include_content}|g")
+    else
+      echo "Warning: Include file '${include_path}' not found" >&2
+      # Remove the include directive to prevent infinite loop
+      template=$(echo "${template}" | sed "s|{{ include \"${include_file}\" }}||g")
+    fi
+    ((include_iterations++))
+  done
   
   # Build associative array of variables (bash 4+)
   declare -A vars
@@ -269,12 +360,29 @@ render_template() {
   echo "${template}"
 }
 
+# Escape a string for safe embedding in JSON
+# Arguments: $1 = string to escape
+# Outputs: escaped string via echo
+escape_for_json() {
+  local input="${1}"
+  # Use jq to properly escape the string for JSON
+  # The -Rs flags: -R reads raw input, -s slurps into single string
+  # Output is a valid JSON string (with quotes), we strip the quotes
+  local escaped=$(echo -n "${input}" | jq -Rs '.' | sed 's/^"//;s/"$//')
+  echo "${escaped}"
+}
+
 # Send a message to the Discord webhook
 # Arguments: $1 = message, $2 = context for error logging
 send_webhook() {
   local message="${1}"
   local context="${2}"
-  local payload='{"username": "'${bot_name}'", "content": "'${message}'"}'
+  
+  # Escape message content for JSON
+  local escaped_message=$(escape_for_json "${message}")
+  local escaped_bot_name=$(escape_for_json "${bot_name}")
+  
+  local payload='{"username": "'"${escaped_bot_name}"'", "content": "'"${escaped_message}"'"}'
 
   if [[ -n "${message}" ]]; then
     if ! curl -sf -H "Content-Type: application/json" -d "${payload}" "${webhookurl}"; then

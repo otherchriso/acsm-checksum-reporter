@@ -204,11 +204,11 @@ We don't have a download link. If this is stock/DLC content, verify your game fi
 2. ✅ Implement `{{ if ... }}...{{ else }}...{{ end }}` blocks (works with all conditional types)
 3. ✅ Implement `{{ if ne .var "value" }}` (not equals)
 
-### Phase 4: Enhancements (Optional)
+### Phase 4: Enhancements (Optional) ✅ COMPLETE
 
-1. Template validation on startup
-2. Include/partial support (`{{ include "_footer.tmpl" }}`)
-3. Variable escaping for special characters
+1. ✅ Template validation on startup (validate_templates(), validate_template_syntax())
+2. ✅ Include/partial support (`{{ include "_footer.tmpl" }}`) with nested include support
+3. ✅ Variable escaping for special characters (escape_for_json() using jq)
 
 ---
 
