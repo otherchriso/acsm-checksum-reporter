@@ -160,6 +160,7 @@ render_template() {
   # Build associative array of variables (bash 4+)
   declare -A vars
   local var_list=""
+  local var_values=""
   for arg in "$@"; do
     local key="${arg%%=*}"
     local value="${arg#*=}"
@@ -167,6 +168,9 @@ render_template() {
     # Track non-empty variables for conditional processing
     if [[ -n "${value}" ]]; then
       var_list="${var_list}${key},"
+      # Build key=value pairs for equality checks (escape | in values)
+      local escaped_value=$(echo "${value}" | sed 's/|/\\|/g')
+      var_values="${var_values}${key}=${escaped_value}|"
     fi
   done
   
@@ -179,30 +183,78 @@ render_template() {
   done
   
   # Process conditional blocks using perl
-  # Pass the list of set variables via environment
-  template=$(TMPL_VARS="${var_list}" perl -0777 -pe '
+  # Pass variable names and values via environment
+  template=$(TMPL_VARS="${var_list}" TMPL_VALUES="${var_values}" perl -0777 -pe '
     my %set_vars = map { $_ => 1 } split /,/, $ENV{"TMPL_VARS"};
     
-    # Process {{ if not .var }}...{{ end }} blocks first
+    # Parse variable values for equality comparisons
+    my %var_values;
+    for my $pair (split /\|/, $ENV{"TMPL_VALUES"}) {
+      if ($pair =~ /^([^=]+)=(.*)$/) {
+        $var_values{$1} = $2;
+      }
+    }
+    
+    # Process {{ if eq .var "value" }}...{{ else }}...{{ end }} blocks
+    while (/\{\{ if eq \.(\w+) "([^"]*)" \}\}(.*?)\{\{ end \}\}/s) {
+      my $var = $1;
+      my $compare_val = $2;
+      my $block = $3;
+      my $replacement = "";
+      my $actual_val = $var_values{$var} // "";
+      
+      if ($block =~ /^(.*?)\{\{ else \}\}(.*)$/s) {
+        my ($if_content, $else_content) = ($1, $2);
+        $replacement = ($actual_val eq $compare_val) ? $if_content : $else_content;
+      } else {
+        $replacement = ($actual_val eq $compare_val) ? $block : "";
+      }
+      s/\{\{ if eq \.$var "[^"]*" \}\}.*?\{\{ end \}\}/$replacement/s;
+    }
+    
+    # Process {{ if ne .var "value" }}...{{ else }}...{{ end }} blocks
+    while (/\{\{ if ne \.(\w+) "([^"]*)" \}\}(.*?)\{\{ end \}\}/s) {
+      my $var = $1;
+      my $compare_val = $2;
+      my $block = $3;
+      my $replacement = "";
+      my $actual_val = $var_values{$var} // "";
+      
+      if ($block =~ /^(.*?)\{\{ else \}\}(.*)$/s) {
+        my ($if_content, $else_content) = ($1, $2);
+        $replacement = ($actual_val ne $compare_val) ? $if_content : $else_content;
+      } else {
+        $replacement = ($actual_val ne $compare_val) ? $block : "";
+      }
+      s/\{\{ if ne \.$var "[^"]*" \}\}.*?\{\{ end \}\}/$replacement/s;
+    }
+    
+    # Process {{ if not .var }}...{{ else }}...{{ end }} blocks
     while (/\{\{ if not \.(\w+) \}\}(.*?)\{\{ end \}\}/s) {
       my $var = $1;
-      my $content = $2;
+      my $block = $2;
       my $replacement = "";
-      # Include content only if variable is NOT set
-      if (!$set_vars{$var}) {
-        $replacement = $content;
+      
+      if ($block =~ /^(.*?)\{\{ else \}\}(.*)$/s) {
+        my ($if_content, $else_content) = ($1, $2);
+        $replacement = (!$set_vars{$var}) ? $if_content : $else_content;
+      } else {
+        $replacement = (!$set_vars{$var}) ? $block : "";
       }
       s/\{\{ if not \.$var \}\}.*?\{\{ end \}\}/$replacement/s;
     }
     
-    # Process {{ if .var }}...{{ end }} blocks  
+    # Process {{ if .var }}...{{ else }}...{{ end }} blocks
     while (/\{\{ if \.(\w+) \}\}(.*?)\{\{ end \}\}/s) {
       my $var = $1;
-      my $content = $2;
+      my $block = $2;
       my $replacement = "";
-      # Include content only if variable IS set
-      if ($set_vars{$var}) {
-        $replacement = $content;
+      
+      if ($block =~ /^(.*?)\{\{ else \}\}(.*)$/s) {
+        my ($if_content, $else_content) = ($1, $2);
+        $replacement = ($set_vars{$var}) ? $if_content : $else_content;
+      } else {
+        $replacement = ($set_vars{$var}) ? $block : "";
       }
       s/\{\{ if \.$var \}\}.*?\{\{ end \}\}/$replacement/s;
     }

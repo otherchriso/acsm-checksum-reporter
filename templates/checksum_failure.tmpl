@@ -20,8 +20,7 @@ Checksum failed for **{{ .driver }}** on {{ .contentType }} **{{ .contentName }}
 
 :arrow_down: **Content download:**
 <{{ .downloadURL }}>
-{{ end }}
-{{ if not .downloadURL }}
+{{ else }}
 
 We don't have a download link for that. If the content is stock or DLC, make sure you have installed it, and verify your game files in Steam.
 {{ end }}

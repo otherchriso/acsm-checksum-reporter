@@ -198,11 +198,11 @@ We don't have a download link. If this is stock/DLC content, verify your game fi
    - Look up `failedFile` in `custom_checksums.json`
 4. ✅ Expose `{{ .customName }}` variable for custom checksums (e.g. "Helicorsa", "Custom Shaders Patch")
 
-### Phase 3: Advanced Conditionals
+### Phase 3: Advanced Conditionals ✅ COMPLETE
 
-1. Implement `{{ if eq .var "value" }}` syntax
-2. Implement `{{ if else }}` blocks
-3. Consider `{{ if ne .var "value" }}` (not equals)
+1. ✅ Implement `{{ if eq .var "value" }}` syntax
+2. ✅ Implement `{{ if ... }}...{{ else }}...{{ end }}` blocks (works with all conditional types)
+3. ✅ Implement `{{ if ne .var "value" }}` (not equals)
 
 ### Phase 4: Enhancements (Optional)
 
