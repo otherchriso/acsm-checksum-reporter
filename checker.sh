@@ -242,6 +242,27 @@ prepare_no_slots_message() {
   echo "${message}|${driver} (no available slots)"
 }
 
+# Prepare message for UDP plugin kick
+# Arguments: $1 = the log line containing the kick
+# Outputs: message via echo
+prepare_plugin_kick_message() {
+  local logline="${1}"
+  local message=""
+
+  # Extract driver name from: Kicking: CarID: <int>, Name: <name>, GUID: <guid>
+  local driver=$(echo "${logline}" | sed -n 's/.*Name: \([^,]*\),.*/\1/p' | xargs)
+
+  # Initialise the message 
+  message="${message_prefix}\n"
+
+  message="${message}\nDriver **${driver}** was kicked by a server plugin. Check you have met the requirements and are following all the rules."
+
+  message="${message}\n${message_suffix}"
+
+  # Return the message and context
+  echo "${message}|${driver} (plugin kick)"
+}
+
 tail -Fn0 "${watchedlog}" 2>&1 | \
 while read -r line; do
 
@@ -264,6 +285,13 @@ while read -r line; do
   # Detection: No available slots (assigned drivers only)
   elif [[ $(echo "${line}" | egrep -c 'Could not connect driver.*no available slots') -gt 0 ]]; then
     result=$(prepare_no_slots_message "${line}")
+    message="${result%|*}"
+    context="${result#*|}"
+    send_webhook "${message}" "${context}"
+
+  # Detection: Kicked by UDP plugin (e.g. Real Penalty, KMR, stracker)
+  elif [[ $(echo "${line}" | egrep -c 'Kicking:.*reason: UDP Plugin') -gt 0 ]]; then
+    result=$(prepare_plugin_kick_message "${line}")
     message="${result%|*}"
     context="${result#*|}"
     send_webhook "${message}" "${context}"
