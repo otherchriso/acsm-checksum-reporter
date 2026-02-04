@@ -31,14 +31,18 @@ if [[ -z "${contentpath}" ]]; then
   exit 1
 fi
 
-if [[ -z "${message_prefix}" ]]; then
-  echo "Error: message_prefix is not set in checksum.env." >&2
-  exit 1
-fi
+# message_prefix and message_suffix are only required if templates are not available
+templates_path="${templates_path:-./templates}"
+if [[ ! -d "${templates_path}" ]]; then
+  if [[ -z "${message_prefix}" ]]; then
+    echo "Error: message_prefix is not set in checksum.env (required when templates not available)." >&2
+    exit 1
+  fi
 
-if [[ -z "${message_suffix}" ]]; then
-  echo "Error: message_suffix is not set in checksum.env." >&2
-  exit 1
+  if [[ -z "${message_suffix}" ]]; then
+    echo "Error: message_suffix is not set in checksum.env (required when templates not available)." >&2
+    exit 1
+  fi
 fi
 
 if [[ -z "${bot_name}" ]]; then
@@ -69,6 +73,86 @@ if [[ ! -r "${watchedlog}" ]]; then
   echo "Error: Log file '${watchedlog}' is not readable." >&2
   exit 1
 fi
+
+# Template directory (default: ./templates)
+templates_path="${templates_path:-./templates}"
+
+# Render a template with variable substitution and conditional blocks
+# Arguments: $1 = template name (without .tmpl extension)
+#            Remaining args: key=value pairs for variables
+# Outputs: rendered template via echo
+render_template() {
+  local template_name="${1}"
+  shift
+  local template_file="${templates_path}/${template_name}.tmpl"
+  
+  # Check if template exists, fall back to legacy behaviour if not
+  if [[ ! -f "${template_file}" ]]; then
+    echo "Warning: Template '${template_file}' not found, using legacy format" >&2
+    return 1
+  fi
+  
+  local template=$(cat "${template_file}")
+  
+  # Build associative array of variables (bash 4+)
+  declare -A vars
+  local var_list=""
+  for arg in "$@"; do
+    local key="${arg%%=*}"
+    local value="${arg#*=}"
+    vars["${key}"]="${value}"
+    # Track non-empty variables for conditional processing
+    if [[ -n "${value}" ]]; then
+      var_list="${var_list}${key},"
+    fi
+  done
+  
+  # Variable substitution: {{ .varName }} -> value
+  for key in "${!vars[@]}"; do
+    local value="${vars[$key]}"
+    # Escape special characters in value for sed
+    value=$(echo "${value}" | sed 's/[&/\]/\\&/g')
+    template=$(echo "${template}" | sed "s/{{ \.${key} }}/${value}/g")
+  done
+  
+  # Process conditional blocks using perl
+  # Pass the list of set variables via environment
+  template=$(TMPL_VARS="${var_list}" perl -0777 -pe '
+    my %set_vars = map { $_ => 1 } split /,/, $ENV{"TMPL_VARS"};
+    
+    # Process {{ if not .var }}...{{ end }} blocks first
+    while (/\{\{ if not \.(\w+) \}\}(.*?)\{\{ end \}\}/s) {
+      my $var = $1;
+      my $content = $2;
+      my $replacement = "";
+      # Include content only if variable is NOT set
+      if (!$set_vars{$var}) {
+        $replacement = $content;
+      }
+      s/\{\{ if not \.$var \}\}.*?\{\{ end \}\}/$replacement/s;
+    }
+    
+    # Process {{ if .var }}...{{ end }} blocks  
+    while (/\{\{ if \.(\w+) \}\}(.*?)\{\{ end \}\}/s) {
+      my $var = $1;
+      my $content = $2;
+      my $replacement = "";
+      # Include content only if variable IS set
+      if ($set_vars{$var}) {
+        $replacement = $content;
+      }
+      s/\{\{ if \.$var \}\}.*?\{\{ end \}\}/$replacement/s;
+    }
+  ' <<< "${template}")
+  
+  # Clean up any remaining unsubstituted variables (replace with empty)
+  template=$(echo "${template}" | sed 's/{{ \.[a-zA-Z]*}}//g')
+  
+  # Clean up multiple consecutive blank lines
+  template=$(echo "${template}" | cat -s)
+  
+  echo "${template}"
+}
 
 # Send a message to the Discord webhook
 # Arguments: $1 = message, $2 = context for error logging
@@ -111,12 +195,6 @@ prepare_checksum_message() {
   local contentname=$(echo "${details}" \
                 | awk -F'/' '{print $3}')
 
-  # Initialise the message 
-  message="${message_prefix}\n"
-
-  # Who, what, where
-  message="${message}\nChecksum failed for **${driver}** on ${contenttype} **${contentname}**"
-
   # Now for some more info
   local hintfile=""
   [[ ${contenttype} == "track" ]] && hintfile="${contentpath}${contenttype}s/${contentname}/ui/meta_data.json"
@@ -133,15 +211,10 @@ prepare_checksum_message() {
   if [[ -f dlc ]]; then
     dlc="$(jq -r ".${contentname}" dlc)"
   fi
-  [[ ${#dlc} -gt 5 ]] \
-  && message="${message}\n\n${contentname} is available with the **${dlc}** DLC." \
-  || /bin/true
+  # Clean up null/empty dlc
+  [[ "${dlc}" == "null" || ${#dlc} -lt 5 ]] && dlc=""
 
   # Check for any notes about this content.
-  # This is a rich text field, so... there be dragons.
-  # Since Discord somehow can't handle hyperlinks which the WWW has had since 1988
-  # we will convert links to "__text__ _(title)_" format, 
-  # then create some line breaks, and strip as much other HTML as we can
   local notes=""
   if [[ -f "${hintfile}" ]]; then
     notes=$(jq -r .notes "${hintfile}" \
@@ -163,38 +236,40 @@ prepare_checksum_message() {
   fi
 
   # sometimes an empty save results in "<p><br></p>" so let's deal with that
-  [[ "${notes}" == "\n\n\n" ]] && notes=""
+  [[ "${notes}" == "\n\n\n" || "${notes}" == "null" ]] && notes=""
 
-  # stash this in a variable we are about to manipulate
+  # Clean up egregious self-referencing links in notes
   local revised_line="${notes}"
-
   for word in $(echo "${notes}"); do
-    # store any occurence of http[^ ]* into a variable "link"
     local link=$(echo "${word}" \
              | egrep -o 'http.*' \
              | sed 's|\\n$||' \
              | sed 's|__$||')
-    # it is likely long URIs are sometimes hyperlinked as themselves in the notes
-    # making for an extremely ugly presentation in Discord
-    # referencing the formatting we built into the $notes definition above...
-    # replace any occurrences of "__link__ _(link)_" with simply "link"
     revised_line=$(echo "${revised_line}" \
                    | sed "s|__${link}__ _.<${link}>._|<${link}>|g")
   done
-
-  # Now that we have cleaned up any egregious links
-  # let's update that main notes variable
   notes="${revised_line}"
 
-  [[ ${#downloadurl} -gt 5 ]] \
-  && message="${message}\n\n**Content download:**\n<${downloadurl}>\n" \
-  || message="${message}\n\nWe don't have a download link for that. If the content is stock or DLC, make sure you have installed it, and verify your game files in Steam.\n"
-
-  [[ ${#notes} -gt 3 ]] \
-  && message="${message}\n**Important notes:**\n${notes}" \
-  || /bin/true
-
-  message="${message}\n${message_suffix}"
+  # Try to render from template
+  message=$(render_template "checksum_failure" \
+    "driver=${driver}" \
+    "contentType=${contenttype}" \
+    "contentName=${contentname}" \
+    "downloadURL=${downloadurl}" \
+    "dlcPack=${dlc}" \
+    "notes=${notes}")
+  
+  # Fall back to legacy format if template rendering failed
+  if [[ $? -ne 0 || -z "${message}" ]]; then
+    message="${message_prefix}\n"
+    message="${message}\nChecksum failed for **${driver}** on ${contenttype} **${contentname}**"
+    [[ -n "${dlc}" ]] && message="${message}\n\n${contentname} is available with the **${dlc}** DLC."
+    [[ ${#downloadurl} -gt 5 ]] \
+    && message="${message}\n\n**Content download:**\n<${downloadurl}>\n" \
+    || message="${message}\n\nWe don't have a download link for that. If the content is stock or DLC, make sure you have installed it, and verify your game files in Steam.\n"
+    [[ ${#notes} -gt 3 ]] && message="${message}\n**Important notes:**\n${notes}"
+    message="${message}\n${message_suffix}"
+  fi
 
   # Return the message and context (driver on contentname)
   echo "${message}|${driver} on ${contentname}"
@@ -210,12 +285,15 @@ prepare_session_closed_message() {
   # Extract driver name from: Driver: John Smith (76561198012345678) tried to join
   local driver=$(echo "${logline}" | sed -n 's/.*Driver: \([^(]*\)(.*/\1/p' | xargs)
 
-  # Initialise the message 
-  message="${message_prefix}\n"
-
-  message="${message}\nJoining was blocked for **${driver}** because the current session is closed. \n\nDepending on the server configuration, it _might_ be possible to join when the session ends, e.g. after qualifying but before the race."
-
-  message="${message}\n${message_suffix}"
+  # Try to render from template
+  message=$(render_template "session_closed" "driver=${driver}")
+  
+  # Fall back to legacy format if template rendering failed
+  if [[ $? -ne 0 || -z "${message}" ]]; then
+    message="${message_prefix}\n"
+    message="${message}\nJoining was blocked for **${driver}** because the current session is closed. \n\nDepending on the server configuration, it _might_ be possible to join when the session ends, e.g. after qualifying but before the race."
+    message="${message}\n${message_suffix}"
+  fi
 
   # Return the message and context
   echo "${message}|${driver} (session closed)"
@@ -231,12 +309,15 @@ prepare_no_slots_message() {
   # Extract driver name from: Could not connect driver (<name>/<guid>) to car.
   local driver=$(echo "${logline}" | sed -n 's/.*Could not connect driver (\([^/]*\)\/.*/\1/p' | xargs)
 
-  # Initialise the message 
-  message="${message_prefix}\n"
-
-  message="${message}\nJoining was blocked (handshake failure) for **${driver}** because the server only accepts assigned drivers at the moment. Check if it's still possible to _register_ for the event, which might permit entry after the next full server restart."
-
-  message="${message}\n${message_suffix}"
+  # Try to render from template
+  message=$(render_template "no_slots" "driver=${driver}")
+  
+  # Fall back to legacy format if template rendering failed
+  if [[ $? -ne 0 || -z "${message}" ]]; then
+    message="${message_prefix}\n"
+    message="${message}\nJoining was blocked (handshake failure) for **${driver}** because the server only accepts assigned drivers at the moment. Check if it's still possible to _register_ for the event, which might permit entry after the next full server restart."
+    message="${message}\n${message_suffix}"
+  fi
 
   # Return the message and context
   echo "${message}|${driver} (no available slots)"
@@ -252,12 +333,15 @@ prepare_plugin_kick_message() {
   # Extract driver name from: Kicking: CarID: <int>, Name: <name>, GUID: <guid>
   local driver=$(echo "${logline}" | sed -n 's/.*Name: \([^,]*\),.*/\1/p' | xargs)
 
-  # Initialise the message 
-  message="${message_prefix}\n"
-
-  message="${message}\nDriver **${driver}** was kicked by a server plugin. Check you have met the requirements and are following all the rules."
-
-  message="${message}\n${message_suffix}"
+  # Try to render from template
+  message=$(render_template "plugin_kick" "driver=${driver}")
+  
+  # Fall back to legacy format if template rendering failed
+  if [[ $? -ne 0 || -z "${message}" ]]; then
+    message="${message_prefix}\n"
+    message="${message}\nDriver **${driver}** was kicked by a server plugin. Check you have met the requirements and are following all the rules."
+    message="${message}\n${message_suffix}"
+  fi
 
   # Return the message and context
   echo "${message}|${driver} (plugin kick)"

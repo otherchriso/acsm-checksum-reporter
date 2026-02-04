@@ -1,0 +1,21 @@
+:warning: **Checksum Mismatch Detected**
+
+Checksum failed for **{{ .driver }}** on {{ .contentType }} **{{ .contentName }}**
+{{ if .dlcPack }}
+
+:package: {{ .contentName }} is available with the **{{ .dlcPack }}** DLC.
+{{ end }}
+{{ if .downloadURL }}
+
+:arrow_down: **Content download:**
+<{{ .downloadURL }}>
+{{ end }}
+{{ if not .downloadURL }}
+
+We don't have a download link for that. If the content is stock or DLC, make sure you have installed it, and verify your game files in Steam.
+{{ end }}
+{{ if .notes }}
+
+:memo: **Important notes:**
+{{ .notes }}
+{{ end }}

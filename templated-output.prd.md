@@ -173,16 +173,16 @@ We don't have a download link. If this is stock/DLC content, verify your game fi
 
 ## Implementation Phases
 
-### Phase 1: Core Templating
+### Phase 1: Core Templating ✅ COMPLETE
 
-1. Create `templates/` directory with default templates
-2. Implement `render_template()` function in bash
+1. ✅ Create `templates/` directory with default templates
+2. ✅ Implement `render_template()` function in bash
    - Load template file
    - Substitute `{{ .var }}` with values
    - Process `{{ if .var }}...{{ end }}` blocks
    - Process `{{ if not .var }}...{{ end }}` blocks
-3. Migrate all `prepare_*_message()` functions to use templates
-4. Deprecate `message_prefix` / `message_suffix` (keep as fallback initially)
+3. ✅ Migrate all `prepare_*_message()` functions to use templates
+4. ✅ Deprecate `message_prefix` / `message_suffix` (keep as fallback initially)
 
 ### Phase 2: Extended Variables
 
