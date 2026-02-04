@@ -7,6 +7,7 @@ When someone joins an [Assetto Corsa Server Manager](https://emperorservers.com/
 
 ![example](https://user-images.githubusercontent.com/77416784/189126614-e4ae5e0d-c53f-4432-8caf-4c618ea190cd.png)
 
+The system is also capable of detecting and reporting similar connection failures such as RealPenalty plugin kicks, locked entry lists etc.
 
 ## Assumed pre-requisites
 
@@ -47,7 +48,7 @@ Discord notifications are fully customisable via template files. You can transla
 
 See [TEMPLATES.md](TEMPLATES.md) for the complete guide.
 
-## Not yet supported
+## Not currently supported
 
 * Single server support (server-manager, not just assetto-multiserver-manager)
 * Multiple instance support (one script controlling multiple installations on same host)
