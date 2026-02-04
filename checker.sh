@@ -25,24 +25,15 @@ fi
 source checksum.env
 source .secrets
 
+# Default values for legacy fallback mode (when templates not available)
+# These can be overridden in checksum.env but are not advertised
+message_prefix="${message_prefix:-:racing_car: :police_car: :racing_car: :police_car: :racing_car: :police_car:\n}"
+message_suffix="${message_suffix:-}"
+
 # Validate required environment variables
 if [[ -z "${contentpath}" ]]; then
   echo "Error: contentpath is not set in checksum.env." >&2
   exit 1
-fi
-
-# message_prefix and message_suffix are only required if templates are not available
-templates_path="${templates_path:-./templates}"
-if [[ ! -d "${templates_path}" ]]; then
-  if [[ -z "${message_prefix}" ]]; then
-    echo "Error: message_prefix is not set in checksum.env (required when templates not available)." >&2
-    exit 1
-  fi
-
-  if [[ -z "${message_suffix}" ]]; then
-    echo "Error: message_suffix is not set in checksum.env (required when templates not available)." >&2
-    exit 1
-  fi
 fi
 
 if [[ -z "${bot_name}" ]]; then

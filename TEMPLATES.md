@@ -137,4 +137,4 @@ Validation checks for:
 
 ## Legacy Mode
 
-If the `templates/` directory doesn't exist, the system falls back to the legacy `message_prefix` / `message_suffix` variables in `checksum.env`. This ensures backwards compatibility with existing installations.
+If the `templates/` directory doesn't exist, the system falls back to a basic hardcoded message format. This ensures the script continues to function even without templates, though you'll lose customisation capabilities.
