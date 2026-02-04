@@ -221,6 +221,27 @@ prepare_session_closed_message() {
   echo "${message}|${driver} (session closed)"
 }
 
+# Prepare message for no available slots rejection
+# Arguments: $1 = the log line containing the rejection
+# Outputs: message via echo
+prepare_no_slots_message() {
+  local logline="${1}"
+  local message=""
+
+  # Extract driver name from: Could not connect driver (<name>/<guid>) to car.
+  local driver=$(echo "${logline}" | sed -n 's/.*Could not connect driver (\([^/]*\)\/.*/\1/p' | xargs)
+
+  # Initialise the message 
+  message="${message_prefix}\n"
+
+  message="${message}\nJoining was blocked (handshake failure) for **${driver}** because the server only accepts assigned drivers at the moment. Check if it's still possible to _register_ for the event, which might permit entry after the next full server restart."
+
+  message="${message}\n${message_suffix}"
+
+  # Return the message and context
+  echo "${message}|${driver} (no available slots)"
+}
+
 tail -Fn0 "${watchedlog}" 2>&1 | \
 while read -r line; do
 
@@ -236,6 +257,13 @@ while read -r line; do
   # Detection: Session closed rejection
   elif [[ $(echo "${line}" | egrep -c 'tried to join but was rejected as current session is closed') -gt 0 ]]; then
     result=$(prepare_session_closed_message "${line}")
+    message="${result%|*}"
+    context="${result#*|}"
+    send_webhook "${message}" "${context}"
+
+  # Detection: No available slots (assigned drivers only)
+  elif [[ $(echo "${line}" | egrep -c 'Could not connect driver.*no available slots') -gt 0 ]]; then
+    result=$(prepare_no_slots_message "${line}")
     message="${result%|*}"
     context="${result#*|}"
     send_webhook "${message}" "${context}"
