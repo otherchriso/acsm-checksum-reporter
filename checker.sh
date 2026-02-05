@@ -228,13 +228,12 @@ render_template() {
     
     if [[ -f "${include_path}" ]]; then
       local include_content=$(cat "${include_path}")
-      # Escape special characters for sed replacement
-      include_content=$(echo "${include_content}" | sed 's/[&/\]/\\&/g')
-      template=$(echo "${template}" | sed "s|{{ include \"${include_file}\" }}|${include_content}|g")
+      # Use bash string replacement (handles multi-line content properly)
+      template="${template//"{{ include \"${include_file}\" }}"/${include_content}}"
     else
       echo "Warning: Include file '${include_path}' not found" >&2
       # Remove the include directive to prevent infinite loop
-      template=$(echo "${template}" | sed "s|{{ include \"${include_file}\" }}||g")
+      template="${template//"{{ include \"${include_file}\" }}"/}"
     fi
     ((include_iterations++))
   done
@@ -266,6 +265,7 @@ render_template() {
   
   # Process conditional blocks using perl
   # Pass variable names and values via environment
+  # Key: process innermost blocks first (those without nested {{ if) to handle nesting
   template=$(TMPL_VARS="${var_list}" TMPL_VALUES="${var_values}" perl -0777 -pe '
     my %set_vars = map { $_ => 1 } split /,/, $ENV{"TMPL_VARS"};
     
@@ -277,68 +277,47 @@ render_template() {
       }
     }
     
-    # Process {{ if eq .var "value" }}...{{ else }}...{{ end }} blocks
-    while (/\{\{ if eq \.(\w+) "([^"]*)" \}\}(.*?)\{\{ end \}\}/s) {
-      my $var = $1;
-      my $compare_val = $2;
-      my $block = $3;
+    # Helper to evaluate a condition and return replacement
+    sub eval_block {
+      my ($condition, $block, $set_vars_ref, $var_values_ref) = @_;
       my $replacement = "";
-      my $actual_val = $var_values{$var} // "";
+      my $result = 0;
       
-      if ($block =~ /^(.*?)\{\{ else \}\}(.*)$/s) {
-        my ($if_content, $else_content) = ($1, $2);
-        $replacement = ($actual_val eq $compare_val) ? $if_content : $else_content;
-      } else {
-        $replacement = ($actual_val eq $compare_val) ? $block : "";
+      # Parse condition type
+      if ($condition =~ /^eq \.(\w+) "([^"]*)"$/) {
+        my ($var, $cmp) = ($1, $2);
+        $result = (($var_values_ref->{$var} // "") eq $cmp);
+      } elsif ($condition =~ /^ne \.(\w+) "([^"]*)"$/) {
+        my ($var, $cmp) = ($1, $2);
+        $result = (($var_values_ref->{$var} // "") ne $cmp);
+      } elsif ($condition =~ /^not \.(\w+)$/) {
+        my $var = $1;
+        $result = !$set_vars_ref->{$var};
+      } elsif ($condition =~ /^\.(\w+)$/) {
+        my $var = $1;
+        $result = $set_vars_ref->{$var};
       }
-      s/\{\{ if eq \.$var "[^"]*" \}\}.*?\{\{ end \}\}/$replacement/s;
+      
+      # Handle else clause
+      if ($block =~ /^(.*?)\{\{ else \}\}(.*)$/s) {
+        $replacement = $result ? $1 : $2;
+      } else {
+        $replacement = $result ? $block : "";
+      }
+      return $replacement;
     }
     
-    # Process {{ if ne .var "value" }}...{{ else }}...{{ end }} blocks
-    while (/\{\{ if ne \.(\w+) "([^"]*)" \}\}(.*?)\{\{ end \}\}/s) {
-      my $var = $1;
-      my $compare_val = $2;
-      my $block = $3;
-      my $replacement = "";
-      my $actual_val = $var_values{$var} // "";
+    # Process innermost blocks first (those without nested {{ if inside)
+    # Repeat until no more matches - this handles arbitrary nesting depth
+    my $changed = 1;
+    while ($changed) {
+      $changed = 0;
       
-      if ($block =~ /^(.*?)\{\{ else \}\}(.*)$/s) {
-        my ($if_content, $else_content) = ($1, $2);
-        $replacement = ($actual_val ne $compare_val) ? $if_content : $else_content;
-      } else {
-        $replacement = ($actual_val ne $compare_val) ? $block : "";
+      # Match {{ if CONDITION }}BLOCK{{ end }} where BLOCK contains no {{ if
+      if (s/\{\{ if ((?:eq |ne |not )?\.(\w+)(?: "[^"]*")?) \}\}((?:(?!\{\{ if )(?!\{\{ end \}\}).)*?)\{\{ end \}\}/
+          eval_block($1, $3, \%set_vars, \%var_values)/es) {
+        $changed = 1;
       }
-      s/\{\{ if ne \.$var "[^"]*" \}\}.*?\{\{ end \}\}/$replacement/s;
-    }
-    
-    # Process {{ if not .var }}...{{ else }}...{{ end }} blocks
-    while (/\{\{ if not \.(\w+) \}\}(.*?)\{\{ end \}\}/s) {
-      my $var = $1;
-      my $block = $2;
-      my $replacement = "";
-      
-      if ($block =~ /^(.*?)\{\{ else \}\}(.*)$/s) {
-        my ($if_content, $else_content) = ($1, $2);
-        $replacement = (!$set_vars{$var}) ? $if_content : $else_content;
-      } else {
-        $replacement = (!$set_vars{$var}) ? $block : "";
-      }
-      s/\{\{ if not \.$var \}\}.*?\{\{ end \}\}/$replacement/s;
-    }
-    
-    # Process {{ if .var }}...{{ else }}...{{ end }} blocks
-    while (/\{\{ if \.(\w+) \}\}(.*?)\{\{ end \}\}/s) {
-      my $var = $1;
-      my $block = $2;
-      my $replacement = "";
-      
-      if ($block =~ /^(.*?)\{\{ else \}\}(.*)$/s) {
-        my ($if_content, $else_content) = ($1, $2);
-        $replacement = ($set_vars{$var}) ? $if_content : $else_content;
-      } else {
-        $replacement = ($set_vars{$var}) ? $block : "";
-      }
-      s/\{\{ if \.$var \}\}.*?\{\{ end \}\}/$replacement/s;
     }
   ' <<< "${template}")
   
