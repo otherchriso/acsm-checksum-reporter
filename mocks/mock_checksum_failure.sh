@@ -12,6 +12,7 @@ usage() {
   echo "  minimal     - Only driver, contentType, contentName (no optional fields)"
   echo "  with-url    - Includes download URL"
   echo "  with-dlc    - Includes DLC pack info"
+  echo "  with-oc     - Original game content (no DLC)"
   echo "  with-notes  - Includes notes field"
   echo "  custom-mod  - Custom mod with checksum info"
   echo "  full        - All fields populated (default)"
@@ -56,6 +57,7 @@ case "${SCENARIO}" in
     customName=""
     downloadURL=""
     dlcPack=""
+    isOriginalContent=""
     notes=""
     ;;
   with-url)
@@ -67,6 +69,7 @@ case "${SCENARIO}" in
     customName=""
     downloadURL="https://www.racedepartment.com/downloads/example-mod.12345/"
     dlcPack=""
+    isOriginalContent=""
     notes=""
     ;;
   with-dlc)
@@ -78,6 +81,19 @@ case "${SCENARIO}" in
     customName=""
     downloadURL=""
     dlcPack="Porsche Pack I"
+    isOriginalContent=""
+    notes=""
+    ;;
+  with-oc)
+    driver="Charles Leclerc"
+    contentType="car"
+    contentName="lotus_exige_v6_cup"
+    failedFile="content/cars/lotus_exige_v6_cup/data.acd"
+    expectedChecksum=""
+    customName=""
+    downloadURL=""
+    dlcPack=""
+    isOriginalContent="true"
     notes=""
     ;;
   with-notes)
@@ -89,17 +105,19 @@ case "${SCENARIO}" in
     customName=""
     downloadURL="https://example.com/spa-mod"
     dlcPack=""
+    isOriginalContent=""
     notes="This is a custom version of Spa with updated surfaces.\nMake sure to download version 2.1 or later."
     ;;
   custom-mod)
     driver="Lando Norris"
-    contentType="car"
-    contentName="rss_formula_hybrid_2023"
-    failedFile="content/cars/rss_formula_hybrid_2023/data.acd"
+    contentType=""
+    contentName=""
+    failedFile="apps/python/sol_weather/sol_weather.py"
     expectedChecksum="abc123def456"
-    customName="RSS Formula Hybrid 2023 v1.2"
-    downloadURL="https://racesimstudio.com/rss-formula-hybrid-2023"
+    customName="Sol"
+    downloadURL="https://www.racedepartment.com/downloads/sol.24914/"
     dlcPack=""
+    isOriginalContent=""
     notes=""
     ;;
   full)
@@ -111,6 +129,7 @@ case "${SCENARIO}" in
     customName="Ferrari SF70H Server Pack"
     downloadURL="https://www.racedepartment.com/downloads/ferrari-sf70h.54321/"
     dlcPack="Ferrari 70th Anniversary"
+    isOriginalContent=""
     notes="Updated physics for competitive racing.\nVersion must match server exactly."
     ;;
   *)
@@ -132,6 +151,7 @@ message=$(render_template "checksum_failure" \
   "customName=${customName}" \
   "downloadURL=${downloadURL}" \
   "dlcPack=${dlcPack}" \
+  "isOriginalContent=${isOriginalContent}" \
   "notes=${notes}")
 
 render_status=$?

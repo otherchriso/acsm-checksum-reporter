@@ -218,9 +218,6 @@ render_template() {
   
   local template=$(cat "${template_file}")
   
-  # Strip comments: {{/* ... */}} (supports multi-line)
-  template=$(perl -0777 -pe 's/\{\{\/\*.*?\*\/\}\}//gs' <<< "${template}")
-  
   # Process {{ include "filename.tmpl" }} directives
   # Use a loop to handle nested includes (max 10 iterations to prevent infinite loops)
   local include_iterations=0
@@ -240,6 +237,10 @@ render_template() {
     fi
     ((include_iterations++))
   done
+  
+  # Strip comments: {{/* ... */}} (supports multi-line)
+  # Done after includes so comments in included files are also stripped
+  template=$(perl -0777 -pe 's/\{\{\/\*.*?\*\/\}\}//gs' <<< "${template}")
   
   # Build associative array of variables (bash 4+)
   declare -A vars
@@ -407,13 +408,15 @@ prepare_checksum_message() {
     downloadurl=$(jq -r .downloadURL "${hintfile}" | xargs)
   fi
 
-  # Is this content part of a DLC pack?
+  # Is this content part of a DLC pack or original game content?
   local dlc=""
-  if [[ -f dlc ]]; then
-    dlc="$(jq -r ".${contentname}" dlc)"
+  local is_original_content=""
+  if [[ -f original_content ]]; then
+    dlc="$(jq -r ".${contentname}" original_content)"
   fi
-  # Clean up null/empty dlc
-  [[ "${dlc}" == "null" || ${#dlc} -lt 5 ]] && dlc=""
+  # Track original content, then clean up to keep only actual DLC pack names
+  [[ "${dlc}" == "Default content" ]] && is_original_content="true"
+  [[ "${dlc}" == "null" || "${dlc}" == "Default content" || ${#dlc} -lt 5 ]] && dlc=""
 
   # Check for any notes about this content.
   local notes=""
@@ -479,6 +482,7 @@ prepare_checksum_message() {
     "customName=${customname}" \
     "downloadURL=${downloadurl}" \
     "dlcPack=${dlc}" \
+    "isOriginalContent=${is_original_content}" \
     "notes=${notes}")
   
   # Fall back to legacy format if template rendering failed

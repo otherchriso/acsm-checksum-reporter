@@ -1,28 +1,28 @@
-:warning: **Checksum Mismatch Detected**
-
-Checksum failed for **{{ .driver }}** on {{ .contentType }} **{{ .contentName }}**
+# :racing_car: :police_car: :racing_car: :police_car: :racing_car: :police_car:
 {{ if .customName }}
-
-:wrench: **Required mod:** {{ .customName }}
+Checksum failed for **{{ .driver }}** on required app **{{ .customName }}**
+{{ else }}
+Checksum failed for **{{ .driver }}** on {{ .contentType }} **{{ .contentName }}**
 {{ end }}
 {{ if .failedFile }}
 
-:file_folder: **File:** `{{ .failedFile }}`
-{{ if .expectedChecksum }}
-:hash: **Expected checksum:** `{{ .expectedChecksum }}`
-{{ end }}
+:file_folder: **Specifically:** `{{ .failedFile }}`
+{{ if .expectedChecksum }} :hash: **Expected checksum:** `{{ .expectedChecksum }}` {{ end }}
 {{ end }}
 {{ if .dlcPack }}
 
-:package: {{ .contentName }} is available with the **{{ .dlcPack }}** DLC.
+:package: {{ .contentName }} is available with the **{{ .dlcPack }}** DLC. Consider validating your game through Steam to reset any altered files.
+{{ end }}
+{{ if .isOriginalContent }}
+{{ if not .dlcPack }}
+
+:video_game: This content is included with the base game. Consider validating your game through Steam to reset any altered files.
+{{ end }}
 {{ end }}
 {{ if .downloadURL }}
 
 :arrow_down: **Content download:**
 <{{ .downloadURL }}>
-{{ else }}
-
-We don't have a download link for that. If the content is stock or DLC, make sure you have installed it, and verify your game files in Steam.
 {{ end }}
 {{ if .notes }}
 

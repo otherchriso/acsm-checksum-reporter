@@ -87,6 +87,10 @@ render_template() {
     ((include_iterations++))
   done
   
+  # Strip comments: {{/* ... */}} (supports multi-line)
+  # Done after includes so comments in included files are also stripped
+  template=$(perl -0777 -pe 's/\{\{\/\*.*?\*\/\}\}//gs' <<< "${template}")
+  
   # Build associative array of variables (bash 4+)
   declare -A vars
   local var_list=""
