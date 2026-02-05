@@ -50,30 +50,37 @@ echo ""
 # Run each mock
 echo ">>> Plugin Kick"
 "${SCRIPT_DIR}/mock_plugin_kick.sh" ${MODE}
+[[ -z "${MODE}" ]] && sleep 1
 echo ""
 
 echo ">>> No Available Slots"
 "${SCRIPT_DIR}/mock_no_slots.sh" ${MODE}
+[[ -z "${MODE}" ]] && sleep 1
 echo ""
 
 echo ">>> Session Closed"
 "${SCRIPT_DIR}/mock_session_closed.sh" ${MODE}
+[[ -z "${MODE}" ]] && sleep 1
 echo ""
 
 echo ">>> Checksum Failure (minimal)"
 "${SCRIPT_DIR}/mock_checksum_failure.sh" ${MODE} --scenario minimal
+[[ -z "${MODE}" ]] && sleep 1
 echo ""
 
 echo ">>> Checksum Failure (with-url)"
 "${SCRIPT_DIR}/mock_checksum_failure.sh" ${MODE} --scenario with-url
+[[ -z "${MODE}" ]] && sleep 1
 echo ""
 
 echo ">>> Checksum Failure (with-dlc)" 
 "${SCRIPT_DIR}/mock_checksum_failure.sh" ${MODE} --scenario with-dlc
+[[ -z "${MODE}" ]] && sleep 1
 echo ""
 
 echo ">>> Checksum Failure (custom-mod)"
 "${SCRIPT_DIR}/mock_checksum_failure.sh" ${MODE} --scenario custom-mod
+[[ -z "${MODE}" ]] && sleep 1
 echo ""
 
 echo ">>> Checksum Failure (full)"
