@@ -53,6 +53,11 @@ echo ">>> Plugin Kick"
 [[ -z "${MODE}" ]] && sleep 1
 echo ""
 
+echo ">>> Ping Kick"
+"${SCRIPT_DIR}/mock_ping_kick.sh" ${MODE}
+[[ -z "${MODE}" ]] && sleep 1
+echo ""
+
 echo ">>> No Available Slots"
 "${SCRIPT_DIR}/mock_no_slots.sh" ${MODE}
 [[ -z "${MODE}" ]] && sleep 1

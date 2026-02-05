@@ -573,6 +573,30 @@ prepare_plugin_kick_message() {
   echo "${message}|${driver} (plugin kick)"
 }
 
+# Prepare message for ping limit kick
+# Arguments: $1 = the log line containing the kick
+# Outputs: message via echo
+prepare_ping_kick_message() {
+  local logline="${1}"
+  local message=""
+
+  # Extract driver name from: Kicking: CarID: <int>, Name: <name>, GUID: <guid>, Model: <car>, reason: Exceeded Ping Limit
+  local driver=$(echo "${logline}" | sed -n 's/.*Name: \([^,]*\),.*/\1/p' | xargs)
+
+  # Try to render from template
+  message=$(render_template "ping_kick" "driver=${driver}")
+  
+  # Fall back to legacy format if template rendering failed
+  if [[ $? -ne 0 || -z "${message}" ]]; then
+    message="${message_prefix}\n"
+    message="${message}\nDriver **${driver}** was automatically kicked for exceeding the server's ping limit."
+    message="${message}\n${message_suffix}"
+  fi
+
+  # Return the message and context
+  echo "${message}|${driver} (ping kick)"
+}
+
 tail -Fn0 "${watchedlog}" 2>&1 | \
 while read -r line; do
 
@@ -602,6 +626,13 @@ while read -r line; do
   # Detection: Kicked by UDP plugin (e.g. Real Penalty, KMR, stracker)
   elif [[ $(echo "${line}" | egrep -c 'Kicking:.*reason: UDP Plugin') -gt 0 ]]; then
     result=$(prepare_plugin_kick_message "${line}")
+    message="${result%|*}"
+    context="${result#*|}"
+    send_webhook "${message}" "${context}"
+
+  # Detection: Kicked for exceeding ping limit
+  elif [[ $(echo "${line}" | egrep -c 'Kicking:.*reason: Exceeded Ping Limit') -gt 0 ]]; then
+    result=$(prepare_ping_kick_message "${line}")
     message="${result%|*}"
     context="${result#*|}"
     send_webhook "${message}" "${context}"
