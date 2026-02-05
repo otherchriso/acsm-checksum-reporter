@@ -597,6 +597,30 @@ prepare_ping_kick_message() {
   echo "${message}|${driver} (ping kick)"
 }
 
+# Prepare message for no join list rejection (previously kicked this session)
+# Arguments: $1 = the log line containing the rejection
+# Outputs: message via echo
+prepare_no_join_list_message() {
+  local logline="${1}"
+  local message=""
+
+  # Extract driver name from: Driver: <name> (<guid>) was rejected as their guid is in the no join list
+  local driver=$(echo "${logline}" | sed -n 's/.*Driver: \([^(]*\)(.*/\1/p' | xargs)
+
+  # Try to render from template
+  message=$(render_template "no_join_list" "driver=${driver}")
+  
+  # Fall back to legacy format if template rendering failed
+  if [[ $? -ne 0 || -z "${message}" ]]; then
+    message="${message_prefix}\n"
+    message="${message}\nDriver **${driver}** was rejected because they were previously kicked during this session."
+    message="${message}\n${message_suffix}"
+  fi
+
+  # Return the message and context
+  echo "${message}|${driver} (no join list)"
+}
+
 tail -Fn0 "${watchedlog}" 2>&1 | \
 while read -r line; do
 
@@ -633,6 +657,13 @@ while read -r line; do
   # Detection: Kicked for exceeding ping limit
   elif [[ $(echo "${line}" | egrep -c 'Kicking:.*reason: Exceeded Ping Limit') -gt 0 ]]; then
     result=$(prepare_ping_kick_message "${line}")
+    message="${result%|*}"
+    context="${result#*|}"
+    send_webhook "${message}" "${context}"
+
+  # Detection: Rejected due to no join list (previously kicked this session)
+  elif [[ $(echo "${line}" | egrep -c 'was rejected as their guid is in the no join list') -gt 0 ]]; then
+    result=$(prepare_no_join_list_message "${line}")
     message="${result%|*}"
     context="${result#*|}"
     send_webhook "${message}" "${context}"

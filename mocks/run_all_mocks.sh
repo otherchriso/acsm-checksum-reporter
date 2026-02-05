@@ -58,6 +58,11 @@ echo ">>> Ping Kick"
 [[ -z "${MODE}" ]] && sleep 1
 echo ""
 
+echo ">>> No Join List (previously kicked)"
+"${SCRIPT_DIR}/mock_no_join_list.sh" ${MODE}
+[[ -z "${MODE}" ]] && sleep 1
+echo ""
+
 echo ">>> No Available Slots"
 "${SCRIPT_DIR}/mock_no_slots.sh" ${MODE}
 [[ -z "${MODE}" ]] && sleep 1
