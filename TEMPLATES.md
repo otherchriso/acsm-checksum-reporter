@@ -67,7 +67,26 @@ This is not a track.
 - `eq` = equals
 - `ne` = not equals
 
-### 3. Includes
+### 3. Comments
+
+Add comments that won't appear in the output:
+
+```
+{{/* This is a comment */}}
+```
+
+Multi-line comments are also supported:
+
+```
+{{/*
+
+None of this content will be rendered,
+including blank lines.
+
+*/}}
+```
+
+### 4. Includes
 
 Embed another template file:
 

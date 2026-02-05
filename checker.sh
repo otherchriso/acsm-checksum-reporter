@@ -218,6 +218,9 @@ render_template() {
   
   local template=$(cat "${template_file}")
   
+  # Strip comments: {{/* ... */}} (supports multi-line)
+  template=$(perl -0777 -pe 's/\{\{\/\*.*?\*\/\}\}//gs' <<< "${template}")
+  
   # Process {{ include "filename.tmpl" }} directives
   # Use a loop to handle nested includes (max 10 iterations to prevent infinite loops)
   local include_iterations=0
