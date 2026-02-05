@@ -640,7 +640,7 @@ while read -r line; do
     context="${result#*|}"
     send_webhook "${message}" "${context}"
 
-  # Detection: No available slots (assigned drivers only)
+  # Detection: No available slots (assigned drivers only, unoccupied driver swap slot)
   elif [[ $(echo "${line}" | egrep -c 'Could not connect driver.*no available slots') -gt 0 ]]; then
     result=$(prepare_no_slots_message "${line}")
     message="${result%|*}"
