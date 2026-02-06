@@ -39,11 +39,6 @@ $(./latest-linker.sh) &
 
 for dir in "${serverspath}"*/assetto/logs/session/; do
   $(./checker.sh "${dir}latest.log") &   
-  echo "Watching ${dir}latest.log"
 done
-
-
-echo "here are my checker children"
-echo $(jobs -p)
 
 sleep infinity

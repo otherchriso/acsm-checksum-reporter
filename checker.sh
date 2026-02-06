@@ -54,6 +54,15 @@ fi
 
 watchedlog="${1}"
 
+# Derive a short server name from the log path
+# e.g. /opt/acsm/server/servers/SERVER_00/assetto/logs/session/latest.log -> SERVER_00
+server_name=$(echo "${watchedlog}" | grep -oP 'servers/\K[^/]+')
+server_name="${server_name:-unknown}"
+
+# Structured log helpers
+log_info() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] [INFO] [${server_name}] $*" >&2; }
+log_warn() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] [WARN] [${server_name}] $*" >&2; }
+
 # Check log file exists and is readable
 if [[ ! -f "${watchedlog}" ]]; then
   echo "Error: Log file '${watchedlog}' not found." >&2
@@ -347,10 +356,11 @@ escape_for_json() {
 }
 
 # Send a message to the Discord webhook
-# Arguments: $1 = message, $2 = context for error logging
+# Arguments: $1 = message, $2 = context for error logging, $3 = trigger name
 send_webhook() {
   local message="${1}"
   local context="${2}"
+  local trigger="${3:-unknown}"
   
   # Escape message content for JSON
   local escaped_message=$(escape_for_json "${message}")
@@ -359,8 +369,12 @@ send_webhook() {
   local payload='{"username": "'"${escaped_bot_name}"'", "content": "'"${escaped_message}"'"}'
 
   if [[ -n "${message}" ]]; then
-    if ! curl -sf -H "Content-Type: application/json" -d "${payload}" "${webhookurl}"; then
-      echo "Warning: Failed to send webhook notification for ${context}" >&2
+    local http_status
+    http_status=$(curl -s -o /dev/null -w "%{http_code}" -H "Content-Type: application/json" -d "${payload}" "${webhookurl}")
+    if [[ "${http_status}" =~ ^2 ]]; then
+      log_info "trigger=${trigger} driver=\"${context}\" status=${http_status} result=sent"
+    else
+      log_warn "trigger=${trigger} driver=\"${context}\" status=${http_status} result=failed"
     fi
   fi
 }
@@ -522,7 +536,7 @@ prepare_session_closed_message() {
   fi
 
   # Return the message and context
-  echo "${message}|${driver} (session closed)"
+  echo "${message}|${driver}"
 }
 
 # Prepare message for no available slots rejection
@@ -546,7 +560,7 @@ prepare_no_slots_message() {
   fi
 
   # Return the message and context
-  echo "${message}|${driver} (no available slots)"
+  echo "${message}|${driver}"
 }
 
 # Prepare message for UDP plugin kick
@@ -570,7 +584,7 @@ prepare_plugin_kick_message() {
   fi
 
   # Return the message and context
-  echo "${message}|${driver} (plugin kick)"
+  echo "${message}|${driver}"
 }
 
 # Prepare message for ping limit kick
@@ -594,7 +608,7 @@ prepare_ping_kick_message() {
   fi
 
   # Return the message and context
-  echo "${message}|${driver} (ping kick)"
+  echo "${message}|${driver}"
 }
 
 # Prepare message for no join list rejection (previously kicked this session)
@@ -618,8 +632,10 @@ prepare_no_join_list_message() {
   fi
 
   # Return the message and context
-  echo "${message}|${driver} (no join list)"
+  echo "${message}|${driver}"
 }
+
+log_info "checker started, watching ${watchedlog}"
 
 tail -Fn0 "${watchedlog}" 2>&1 | \
 while read -r line; do
@@ -631,42 +647,42 @@ while read -r line; do
     result=$(prepare_checksum_message "${linebefore}" "${watchedlog}")
     message="${result%|*}"
     context="${result#*|}"
-    send_webhook "${message}" "${context}"
+    send_webhook "${message}" "${context}" "checksum_failure"
 
   # Detection: Session closed rejection
   elif [[ $(echo "${line}" | egrep -c 'tried to join but was rejected as current session is closed') -gt 0 ]]; then
     result=$(prepare_session_closed_message "${line}")
     message="${result%|*}"
     context="${result#*|}"
-    send_webhook "${message}" "${context}"
+    send_webhook "${message}" "${context}" "session_closed"
 
   # Detection: No available slots (assigned drivers only, unoccupied driver swap slot)
   elif [[ $(echo "${line}" | egrep -c 'Could not connect driver.*no available slots') -gt 0 ]]; then
     result=$(prepare_no_slots_message "${line}")
     message="${result%|*}"
     context="${result#*|}"
-    send_webhook "${message}" "${context}"
+    send_webhook "${message}" "${context}" "no_slots"
 
   # Detection: Kicked by UDP plugin (e.g. Real Penalty, KMR, stracker)
   elif [[ $(echo "${line}" | egrep -c 'Kicking:.*reason: UDP Plugin') -gt 0 ]]; then
     result=$(prepare_plugin_kick_message "${line}")
     message="${result%|*}"
     context="${result#*|}"
-    send_webhook "${message}" "${context}"
+    send_webhook "${message}" "${context}" "plugin_kick"
 
   # Detection: Kicked for exceeding ping limit
   elif [[ $(echo "${line}" | egrep -c 'Kicking:.*reason: Exceeded Ping Limit') -gt 0 ]]; then
     result=$(prepare_ping_kick_message "${line}")
     message="${result%|*}"
     context="${result#*|}"
-    send_webhook "${message}" "${context}"
+    send_webhook "${message}" "${context}" "ping_kick"
 
   # Detection: Rejected due to no join list (previously kicked this session)
   elif [[ $(echo "${line}" | egrep -c 'was rejected as their guid is in the no join list') -gt 0 ]]; then
     result=$(prepare_no_join_list_message "${line}")
     message="${result%|*}"
     context="${result#*|}"
-    send_webhook "${message}" "${context}"
+    send_webhook "${message}" "${context}" "no_join_list"
   fi
 
   linebefore="${line}"
