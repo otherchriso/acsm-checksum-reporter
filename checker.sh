@@ -614,6 +614,30 @@ prepare_ping_kick_message() {
   echo "${message}|${driver}"
 }
 
+# Prepare message for idle kick
+# Arguments: $1 = the log line containing the kick
+# Outputs: message via echo
+prepare_idle_kick_message() {
+  local logline="${1}"
+  local message=""
+
+  # Extract driver name from: Kicking: CarID: <int>, Name: <name>, GUID: <guid>, Model: <car>, reason: For Idling
+  local driver=$(echo "${logline}" | sed -n 's/.*Name: \([^,]*\),.*/\1/p' | xargs)
+
+  # Try to render from template
+  message=$(render_template "idle_kick" "driver=${driver}")
+  
+  # Fall back to legacy format if template rendering failed
+  if [[ $? -ne 0 || -z "${message}" ]]; then
+    message="${message_prefix}\n"
+    message="${message}\nDriver **${driver}** was kicked because they were idle for too long."
+    message="${message}\n${message_suffix}"
+  fi
+
+  # Return the message and context
+  echo "${message}|${driver}"
+}
+
 # Prepare message for no join list rejection (previously kicked this session)
 # Arguments: $1 = the log line containing the rejection
 # Outputs: message via echo
@@ -689,6 +713,15 @@ while read -r line; do
     context="${result#*|}"
     guid=$(echo "${line}" | grep -oP 'GUID: \K[0-9]+')
     send_webhook "${message}" "${context}" "ping_kick" "${guid}"
+
+  # Detection: Kicked for idling
+  # GUID field: GUID: <digits>
+  elif [[ $(echo "${line}" | egrep -c 'Kicking:.*reason: For Idling') -gt 0 ]]; then
+    result=$(prepare_idle_kick_message "${line}")
+    message="${result%|*}"
+    context="${result#*|}"
+    guid=$(echo "${line}" | grep -oP 'GUID: \K[0-9]+')
+    send_webhook "${message}" "${context}" "idle_kick" "${guid}"
 
   # Detection: Rejected due to no join list (previously kicked this session)
   # GUID is in parentheses: Driver: Name (GUID) was rejected

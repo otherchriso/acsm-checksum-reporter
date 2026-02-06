@@ -104,6 +104,9 @@ Useful for shared content like footers or disclaimers. By convention, partial te
 | `session_closed.tmpl` | Player rejected (session closed) | `driver` |
 | `no_slots.tmpl` | Player rejected (no available slots) | `driver` |
 | `plugin_kick.tmpl` | Player kicked by UDP plugin | `driver` |
+| `ping_kick.tmpl` | Player kicked for high ping | `driver` |
+| `idle_kick.tmpl` | Player kicked for idling | `driver` |
+| `no_join_list.tmpl` | Player rejected (previously kicked) | `driver` |
 | `_footer.tmpl` | Shared partial (example) | — |
 
 ## Available Variables
