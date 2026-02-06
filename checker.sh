@@ -356,11 +356,12 @@ escape_for_json() {
 }
 
 # Send a message to the Discord webhook
-# Arguments: $1 = message, $2 = context for error logging, $3 = trigger name
+# Arguments: $1 = message, $2 = context for error logging, $3 = trigger name, $4 = GUID (optional)
 send_webhook() {
   local message="${1}"
   local context="${2}"
   local trigger="${3:-unknown}"
+  local guid="${4:-}"
   
   # Escape message content for JSON
   local escaped_message=$(escape_for_json "${message}")
@@ -371,10 +372,12 @@ send_webhook() {
   if [[ -n "${message}" ]]; then
     local http_status
     http_status=$(curl -s -o /dev/null -w "%{http_code}" -H "Content-Type: application/json" -d "${payload}" "${webhookurl}")
+    local guid_field=""
+    [[ -n "${guid}" ]] && guid_field=" guid=${guid}"
     if [[ "${http_status}" =~ ^2 ]]; then
-      log_info "trigger=${trigger} driver=\"${context}\" status=${http_status} result=sent"
+      log_info "trigger=${trigger} driver=\"${context}\"${guid_field} status=${http_status} result=sent"
     else
-      log_warn "trigger=${trigger} driver=\"${context}\" status=${http_status} result=failed"
+      log_warn "trigger=${trigger} driver=\"${context}\"${guid_field} status=${http_status} result=failed"
     fi
   fi
 }
@@ -643,46 +646,58 @@ while read -r line; do
   message=""
 
   # Detection: Checksum validation failure
+  # GUID is on the Kicking line (current line): GUID: <digits>
   if [[ $(echo "${line}" | egrep -c 'Kicking.*Checksum failed') -gt 0 ]]; then
     result=$(prepare_checksum_message "${linebefore}" "${watchedlog}")
     message="${result%|*}"
     context="${result#*|}"
-    send_webhook "${message}" "${context}" "checksum_failure"
+    guid=$(echo "${line}" | grep -oP 'GUID: \K[0-9]+')
+    send_webhook "${message}" "${context}" "checksum_failure" "${guid}"
 
   # Detection: Session closed rejection
+  # GUID is in parentheses: Driver: Name (GUID) tried to join
   elif [[ $(echo "${line}" | egrep -c 'tried to join but was rejected as current session is closed') -gt 0 ]]; then
     result=$(prepare_session_closed_message "${line}")
     message="${result%|*}"
     context="${result#*|}"
-    send_webhook "${message}" "${context}" "session_closed"
+    guid=$(echo "${line}" | grep -oP '\(\K[0-9]+(?=\))')
+    send_webhook "${message}" "${context}" "session_closed" "${guid}"
 
   # Detection: No available slots (assigned drivers only, unoccupied driver swap slot)
+  # GUID is after the slash: Could not connect driver (Name/GUID)
   elif [[ $(echo "${line}" | egrep -c 'Could not connect driver.*no available slots') -gt 0 ]]; then
     result=$(prepare_no_slots_message "${line}")
     message="${result%|*}"
     context="${result#*|}"
-    send_webhook "${message}" "${context}" "no_slots"
+    guid=$(echo "${line}" | grep -oP 'driver \([^/]*/\K[0-9]+(?=\))')
+    send_webhook "${message}" "${context}" "no_slots" "${guid}"
 
   # Detection: Kicked by UDP plugin (e.g. Real Penalty, KMR, stracker)
+  # GUID field: GUID: <digits>
   elif [[ $(echo "${line}" | egrep -c 'Kicking:.*reason: UDP Plugin') -gt 0 ]]; then
     result=$(prepare_plugin_kick_message "${line}")
     message="${result%|*}"
     context="${result#*|}"
-    send_webhook "${message}" "${context}" "plugin_kick"
+    guid=$(echo "${line}" | grep -oP 'GUID: \K[0-9]+')
+    send_webhook "${message}" "${context}" "plugin_kick" "${guid}"
 
   # Detection: Kicked for exceeding ping limit
+  # GUID field: GUID: <digits>
   elif [[ $(echo "${line}" | egrep -c 'Kicking:.*reason: Exceeded Ping Limit') -gt 0 ]]; then
     result=$(prepare_ping_kick_message "${line}")
     message="${result%|*}"
     context="${result#*|}"
-    send_webhook "${message}" "${context}" "ping_kick"
+    guid=$(echo "${line}" | grep -oP 'GUID: \K[0-9]+')
+    send_webhook "${message}" "${context}" "ping_kick" "${guid}"
 
   # Detection: Rejected due to no join list (previously kicked this session)
+  # GUID is in parentheses: Driver: Name (GUID) was rejected
   elif [[ $(echo "${line}" | egrep -c 'was rejected as their guid is in the no join list') -gt 0 ]]; then
     result=$(prepare_no_join_list_message "${line}")
     message="${result%|*}"
     context="${result#*|}"
-    send_webhook "${message}" "${context}" "no_join_list"
+    guid=$(echo "${line}" | grep -oP '\(\K[0-9]+(?=\))')
+    send_webhook "${message}" "${context}" "no_join_list" "${guid}"
   fi
 
   linebefore="${line}"
