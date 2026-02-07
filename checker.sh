@@ -11,6 +11,11 @@ if ! command -v curl &> /dev/null; then
   exit 1
 fi
 
+if ! command -v perl &> /dev/null; then
+  echo "Error: perl is required but not installed." >&2
+  exit 1
+fi
+
 # Check required config files
 if [[ ! -f checksum.env ]]; then
   echo "Error: checksum.env not found." >&2
@@ -710,6 +715,19 @@ prepare_no_join_list_message() {
 }
 
 log_info "checker started, watching ${watchedlog}"
+
+# Report any suppressed announcement types at startup
+suppressed=""
+[[ "${announce_checksum_failures}" != "true" ]] && suppressed="${suppressed} checksum_failure"
+[[ "${announce_session_closed}" != "true" ]]    && suppressed="${suppressed} session_closed"
+[[ "${announce_no_slots}" != "true" ]]          && suppressed="${suppressed} no_slots"
+[[ "${announce_plugin_kicks}" != "true" ]]      && suppressed="${suppressed} plugin_kick"
+[[ "${announce_ping_kicks}" != "true" ]]        && suppressed="${suppressed} ping_kick"
+[[ "${announce_idle_kicks}" != "true" ]]        && suppressed="${suppressed} idle_kick"
+[[ "${announce_no_join_list}" != "true" ]]      && suppressed="${suppressed} no_join_list"
+if [[ -n "${suppressed}" ]]; then
+  log_info "suppressed announcements:${suppressed}"
+fi
 
 tail -Fn0 "${watchedlog}" 2>&1 | \
 while read -r line; do
