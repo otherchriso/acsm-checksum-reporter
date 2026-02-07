@@ -1,13 +1,19 @@
 # ACSM Checksum Reporter
 
-This repo is a set of scripts which solves the following use case:
+This repo is a set of scripts which solves the following primary use case:
 
 When someone joins an [Assetto Corsa Server Manager](https://emperorservers.com/products/assetto-corsa-server-manager) server and receives a checksum failure, a message telling everyone the name of the driver and the cause of the checksum failure is sent to a specific Discord server via webhook.
 
 
 ![example](https://user-images.githubusercontent.com/77416784/189126614-e4ae5e0d-c53f-4432-8caf-4c618ea190cd.png)
 
-The system is also capable of detecting and reporting similar connection failures such as RealPenalty plugin kicks, locked entry lists etc.
+The system will also detect and report similar connection failures:
+* **Session closed**<br>("No join" or "Free join until 20 seconds to the green light")
+* **No slots**<br>(Locked entry list, driver swap overlap)
+* **UDP plugin kicks**<br>(e.g. RealPenalty)
+* **High ping kicks**
+* **Idle player kicks**
+* **Rejoin attempts after being kicked**
 
 ## Assumed pre-requisites
 
@@ -40,7 +46,7 @@ A parent script, `checksum-manager.sh` initiates child scripts that maintain a r
 
 The `latest-linker.sh` child script will poll for log files changing, indicating that new servers are starting, and manage symbolic links so that the `checker.sh` scripts have somewhere constant to watch.
 
-Those `checker.sh` scripts read every line, and when one is found matching the pattern of someone being checksum-kicked, that line and the one before it are parsed. The relevant info is then transmitted to a webhook endpoint.
+Those `checker.sh` scripts read every line, and when one is found matching the pattern of someone being checksum-kicked, the relevant info is then transmitted to a webhook endpoint.
 
 ## Customising Messages
 

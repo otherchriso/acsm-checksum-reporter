@@ -30,6 +30,16 @@ source .secrets
 message_prefix="${message_prefix:-:racing_car: :police_car: :racing_car: :police_car: :racing_car: :police_car:\n}"
 message_suffix="${message_suffix:-}"
 
+# Announcement toggles — default to "true" (log + transmit to Discord)
+# Setting to "false" in checksum.env will log the event but skip the webhook
+announce_checksum_failures="${announce_checksum_failures:-true}"
+announce_session_closed="${announce_session_closed:-true}"
+announce_no_slots="${announce_no_slots:-true}"
+announce_plugin_kicks="${announce_plugin_kicks:-true}"
+announce_ping_kicks="${announce_ping_kicks:-true}"
+announce_idle_kicks="${announce_idle_kicks:-true}"
+announce_no_join_list="${announce_no_join_list:-true}"
+
 # Validate required environment variables
 if [[ -z "${contentpath}" ]]; then
   echo "Error: contentpath is not set in checksum.env." >&2
@@ -355,6 +365,22 @@ escape_for_json() {
   echo "${escaped}"
 }
 
+# Map trigger names to their announce toggle variable names
+# Arguments: $1 = trigger name
+# Outputs: the value of the corresponding announce_* variable
+get_announce_toggle() {
+  case "${1}" in
+    checksum_failure) echo "${announce_checksum_failures}" ;;
+    session_closed)   echo "${announce_session_closed}" ;;
+    no_slots)         echo "${announce_no_slots}" ;;
+    plugin_kick)      echo "${announce_plugin_kicks}" ;;
+    ping_kick)        echo "${announce_ping_kicks}" ;;
+    idle_kick)        echo "${announce_idle_kicks}" ;;
+    no_join_list)     echo "${announce_no_join_list}" ;;
+    *)                echo "true" ;;
+  esac
+}
+
 # Send a message to the Discord webhook
 # Arguments: $1 = message, $2 = context for error logging, $3 = trigger name, $4 = GUID (optional)
 send_webhook() {
@@ -362,23 +388,33 @@ send_webhook() {
   local context="${2}"
   local trigger="${3:-unknown}"
   local guid="${4:-}"
-  
+
+  if [[ -z "${message}" ]]; then
+    return
+  fi
+
+  local guid_field=""
+  [[ -n "${guid}" ]] && guid_field=" guid=${guid}"
+
+  # Check if this trigger type is enabled for Discord transmission
+  local announce=$(get_announce_toggle "${trigger}")
+  if [[ "${announce}" != "true" ]]; then
+    log_info "trigger=${trigger} driver=\"${context}\"${guid_field} status=- result=suppressed"
+    return
+  fi
+
   # Escape message content for JSON
   local escaped_message=$(escape_for_json "${message}")
   local escaped_bot_name=$(escape_for_json "${bot_name}")
   
   local payload='{"username": "'"${escaped_bot_name}"'", "content": "'"${escaped_message}"'"}'
 
-  if [[ -n "${message}" ]]; then
-    local http_status
-    http_status=$(curl -s -o /dev/null -w "%{http_code}" -H "Content-Type: application/json" -d "${payload}" "${webhookurl}")
-    local guid_field=""
-    [[ -n "${guid}" ]] && guid_field=" guid=${guid}"
-    if [[ "${http_status}" =~ ^2 ]]; then
-      log_info "trigger=${trigger} driver=\"${context}\"${guid_field} status=${http_status} result=sent"
-    else
-      log_warn "trigger=${trigger} driver=\"${context}\"${guid_field} status=${http_status} result=failed"
-    fi
+  local http_status
+  http_status=$(curl -s -o /dev/null -w "%{http_code}" -H "Content-Type: application/json" -d "${payload}" "${webhookurl}")
+  if [[ "${http_status}" =~ ^2 ]]; then
+    log_info "trigger=${trigger} driver=\"${context}\"${guid_field} status=${http_status} result=sent"
+  else
+    log_warn "trigger=${trigger} driver=\"${context}\"${guid_field} status=${http_status} result=failed"
   fi
 }
 
