@@ -13,7 +13,7 @@ The system is also capable of detecting and reporting similar connection failure
 
 1. A relatively modern Linux-based environment
 2. A functioning ACSM multiserver installation
-3. GNU coreutils, jq, bash
+3. GNU coreutils, jq, bash, perl
 
 ## Installation
 

@@ -383,62 +383,63 @@ send_webhook() {
 }
 
 # Prepare message for checksum validation failure
-# Arguments: $1 = line before the trigger, $2 = watchedlog path
+# Arguments: $1 = the warning line (contains the failed file path)
+#            $2 = the Kicking line (contains driver name, GUID, model)
 # Outputs: message via echo
 prepare_checksum_message() {
-  local linebefore="${1}"
-  local watchedlog="${2}"
+  local warningline="${1}"
+  local kickline="${2}"
   local message=""
 
-  # this assumes we didn't unluckily land halfway through a kicking 
-  # which would be super dooper unlikely but still...
-  local keypart=$(echo "${linebefore}" | awk -F '"' '{print $2".*"$4}' | sed "s/'/.*/g" | sed 's/[-+]..:../.*/') 
+  # Extract driver name from the Kicking line: Name: <name>,
+  local driver=$(echo "${kickline}" | sed -n 's/.*Name: \([^,]*\),.*/\1/p' | xargs)
 
-  local details=$(egrep -A1 "${keypart}" "${watchedlog}" \
-            | sed -z 's/\n/|/' \
-            | awk -F '"' '{print $4,$8}' )
+  # Extract the failed file path from the warning line:
+  # Car: N failed checksum on file '<path>'. Kicking from server.
+  local failedfile=$(echo "${warningline}" | sed -n "s/.*on file '\([^']*\)'.*/\1/p")
 
-  local driver=$(echo "${details}" \
-           | egrep -o 'Name[^,]*' \
-           | sed 's/Name: //')
+  # Classify the path: content/cars/... -> car, content/tracks/... -> track,
+  # anything else -> required file (apps, plugins, system files, etc.)
+  local contenttype=""
+  local contentname=""
+  local requiredfile=""
 
-  local contenttype=$(echo "${details}" \
-                | awk -F'/' '{print $2}' \
-                | sed 's/s//')
-
-  local contentname=$(echo "${details}" \
-                | awk -F'/' '{print $3}')
-
-  # Extract the failed file path (e.g. "content/cars/mod_name/data.acd")
-  local failedfile=$(echo "${details}" \
-                | awk '{print $1}' \
-                | sed 's/^content/content/')
+  if [[ "${failedfile}" =~ ^content/cars/ ]]; then
+    contenttype="car"
+    contentname=$(echo "${failedfile}" | awk -F'/' '{print $3}')
+  elif [[ "${failedfile}" =~ ^content/tracks/ ]]; then
+    contenttype="track"
+    contentname=$(echo "${failedfile}" | awk -F'/' '{print $3}')
+  else
+    # Required file — show the basename as the most useful identifier
+    requiredfile=$(basename "${failedfile}")
+  fi
 
   # Now for some more info
   local hintfile=""
-  [[ ${contenttype} == "track" ]] && hintfile="${contentpath}${contenttype}s/${contentname}/ui/meta_data.json"
-  [[ ${contenttype} == "car" ]] && hintfile="${contentpath}${contenttype}s/${contentname}/ui/ui_car.json"
+  [[ "${contenttype}" == "track" ]] && hintfile="${contentpath}${contenttype}s/${contentname}/ui/meta_data.json"
+  [[ "${contenttype}" == "car" ]] && hintfile="${contentpath}${contenttype}s/${contentname}/ui/ui_car.json"
   
   # Check if hintfile exists before reading
   local downloadurl=""
   if [[ -f "${hintfile}" ]]; then
-    downloadurl=$(jq -r .downloadURL "${hintfile}" | xargs)
+    downloadurl=$(jq -r '.downloadURL // empty | select(length > 0)' "${hintfile}" | xargs)
   fi
 
   # Is this content part of a DLC pack or original game content?
   local dlc=""
   local is_original_content=""
   if [[ -f original_content ]]; then
-    dlc="$(jq -r ".${contentname}" original_content)"
+    dlc="$(jq -r --arg key "${contentname}" '.[$key] // empty' original_content)"
   fi
   # Track original content, then clean up to keep only actual DLC pack names
   [[ "${dlc}" == "Default content" ]] && is_original_content="true"
-  [[ "${dlc}" == "null" || "${dlc}" == "Default content" || ${#dlc} -lt 5 ]] && dlc=""
+  [[ "${dlc}" == "Default content" || ${#dlc} -lt 5 ]] && dlc=""
 
   # Check for any notes about this content.
   local notes=""
   if [[ -f "${hintfile}" ]]; then
-    notes=$(jq -r .notes "${hintfile}" \
+    notes=$(jq -r '.notes // empty | select(length > 0)' "${hintfile}" \
     | tr '\r\n' ' ' \
     | sed 's|<a href="\([^"]*\)"[^>]*>\([^<]*\)</a>|__\2__ _(#@!\1!@#)_|g' \
     | sed "s|\"|'|g" \
@@ -456,8 +457,9 @@ prepare_checksum_message() {
     | sed 's|\\\\n|\\n|g' )
   fi
 
-  # sometimes an empty save results in "<p><br></p>" so let's deal with that
-  [[ "${notes}" == "\n\n\n" || "${notes}" == "null" ]] && notes=""
+  # Strip notes that are effectively empty (null, whitespace, stray newline escapes)
+  local notes_stripped=$(echo "${notes}" | sed 's/\\n//g' | xargs)
+  [[ -z "${notes_stripped}" ]] && notes=""
 
   # Clean up egregious self-referencing links in notes
   local revised_line="${notes}"
@@ -494,6 +496,7 @@ prepare_checksum_message() {
     "driver=${driver}" \
     "contentType=${contenttype}" \
     "contentName=${contentname}" \
+    "requiredFile=${requiredfile}" \
     "failedFile=${failedfile}" \
     "expectedChecksum=${expectedchecksum}" \
     "customName=${customname}" \
@@ -505,7 +508,11 @@ prepare_checksum_message() {
   # Fall back to legacy format if template rendering failed
   if [[ $? -ne 0 || -z "${message}" ]]; then
     message="${message_prefix}\n"
-    message="${message}\nChecksum failed for **${driver}** on ${contenttype} **${contentname}**"
+    if [[ -n "${requiredfile}" ]]; then
+      message="${message}\nChecksum failed for **${driver}** on required file **${requiredfile}**"
+    else
+      message="${message}\nChecksum failed for **${driver}** on ${contenttype} **${contentname}**"
+    fi
     [[ -n "${dlc}" ]] && message="${message}\n\n${contentname} is available with the **${dlc}** DLC."
     [[ ${#downloadurl} -gt 5 ]] \
     && message="${message}\n\n**Content download:**\n<${downloadurl}>\n" \
@@ -514,8 +521,12 @@ prepare_checksum_message() {
     message="${message}\n${message_suffix}"
   fi
 
-  # Return the message and context (driver on contentname)
-  echo "${message}|${driver} on ${contentname}"
+  # Return the message and context (driver on contentname or requiredfile)
+  if [[ -n "${requiredfile}" ]]; then
+    echo "${message}|${driver} on ${requiredfile}"
+  else
+    echo "${message}|${driver} on ${contentname}"
+  fi
 }
 
 # Prepare message for session closed rejection
@@ -667,12 +678,16 @@ log_info "checker started, watching ${watchedlog}"
 tail -Fn0 "${watchedlog}" 2>&1 | \
 while read -r line; do
 
+  # Skip debug-level lines — these are controlled by an ACSM env var and
+  # should never influence our detection pipeline
+  [[ "${line}" =~ level=debug ]] && continue
+
   message=""
 
   # Detection: Checksum validation failure
-  # GUID is on the Kicking line (current line): GUID: <digits>
+  # The warning line (linebefore) has the file path, the Kicking line has driver/GUID
   if [[ $(echo "${line}" | egrep -c 'Kicking.*Checksum failed') -gt 0 ]]; then
-    result=$(prepare_checksum_message "${linebefore}" "${watchedlog}")
+    result=$(prepare_checksum_message "${linebefore}" "${line}")
     message="${result%|*}"
     context="${result#*|}"
     guid=$(echo "${line}" | grep -oP 'GUID: \K[0-9]+')

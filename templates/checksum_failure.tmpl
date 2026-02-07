@@ -2,7 +2,11 @@
 {{ if .customName }}
 Checksum failed for **{{ .driver }}** on required app **{{ .customName }}**
 {{ else }}
+{{ if .requiredFile }}
+Checksum failed for **{{ .driver }}** on required file **{{ .requiredFile }}**
+{{ else }}
 Checksum failed for **{{ .driver }}** on {{ .contentType }} **{{ .contentName }}**
+{{ end }}
 {{ end }}
 {{ if .failedFile }}
 

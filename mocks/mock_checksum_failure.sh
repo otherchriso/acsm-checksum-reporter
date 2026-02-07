@@ -9,13 +9,14 @@ usage() {
   echo "Usage: $0 [--dry-run] [--scenario <name>]"
   echo ""
   echo "Scenarios:"
-  echo "  minimal     - Only driver, contentType, contentName (no optional fields)"
-  echo "  with-url    - Includes download URL"
-  echo "  with-dlc    - Includes DLC pack info"
-  echo "  with-oc     - Original game content (no DLC)"
-  echo "  with-notes  - Includes notes field"
-  echo "  custom-mod  - Custom mod with checksum info"
-  echo "  full        - All fields populated (default)"
+  echo "  minimal       - Only driver, contentType, contentName (no optional fields)"
+  echo "  with-url      - Includes download URL"
+  echo "  with-dlc      - Includes DLC pack info"
+  echo "  with-oc       - Original game content (no DLC)"
+  echo "  with-notes    - Includes notes field"
+  echo "  required-file - Non-car/track file (e.g. app or plugin)"
+  echo "  custom-mod    - Custom mod with checksum info and known name"
+  echo "  full          - All fields populated (default)"
   echo ""
   echo "Options:"
   echo "  --dry-run   Show rendered message without sending to webhook"
@@ -49,9 +50,10 @@ done
 # Mock data for different scenarios
 case "${SCENARIO}" in
   minimal)
-    driver="TV Car"
+    driver="Driver Zero"
     contentType="track"
     contentName="rj_lemans_1967"
+    requiredFile=""
     failedFile=""
     expectedChecksum=""
     customName=""
@@ -61,9 +63,10 @@ case "${SCENARIO}" in
     notes=""
     ;;
   with-url)
-    driver="John Smith"
+    driver="Driver Zero"
     contentType="car"
     contentName="ks_ferrari_488_gt3"
+    requiredFile=""
     failedFile="content/cars/ks_ferrari_488_gt3/data.acd"
     expectedChecksum=""
     customName=""
@@ -73,9 +76,10 @@ case "${SCENARIO}" in
     notes=""
     ;;
   with-dlc)
-    driver="Max Verstappen"
+    driver="Driver Zero"
     contentType="car"
     contentName="ks_porsche_911_gt3_r_2016"
+    requiredFile=""
     failedFile="content/cars/ks_porsche_911_gt3_r_2016/data.acd"
     expectedChecksum=""
     customName=""
@@ -85,9 +89,10 @@ case "${SCENARIO}" in
     notes=""
     ;;
   with-oc)
-    driver="Charles Leclerc"
+    driver="Driver Zero"
     contentType="car"
     contentName="lotus_exige_v6_cup"
+    requiredFile=""
     failedFile="content/cars/lotus_exige_v6_cup/data.acd"
     expectedChecksum=""
     customName=""
@@ -97,9 +102,10 @@ case "${SCENARIO}" in
     notes=""
     ;;
   with-notes)
-    driver="Lewis Hamilton"
+    driver="Driver Zero"
     contentType="track"
     contentName="spa"
+    requiredFile=""
     failedFile="content/tracks/spa/data/surfaces.ini"
     expectedChecksum=""
     customName=""
@@ -108,10 +114,24 @@ case "${SCENARIO}" in
     isOriginalContent=""
     notes="This is a custom version of Spa with updated surfaces.\nMake sure to download version 2.1 or later."
     ;;
-  custom-mod)
-    driver="Lando Norris"
+  required-file)
+    driver="Driver Zero"
     contentType=""
     contentName=""
+    requiredFile="sol_weather.py"
+    failedFile="apps/python/sol_weather/sol_weather.py"
+    expectedChecksum=""
+    customName=""
+    downloadURL=""
+    dlcPack=""
+    isOriginalContent=""
+    notes=""
+    ;;
+  custom-mod)
+    driver="Driver Zero"
+    contentType=""
+    contentName=""
+    requiredFile=""
     failedFile="apps/python/sol_weather/sol_weather.py"
     expectedChecksum="abc123def456"
     customName="Sol"
@@ -121,9 +141,10 @@ case "${SCENARIO}" in
     notes=""
     ;;
   full)
-    driver="TV Car"
+    driver="Driver Zero"
     contentType="car"
     contentName="ks_ferrari_sf70h"
+    requiredFile=""
     failedFile="content/cars/ks_ferrari_sf70h/data.acd"
     expectedChecksum="deadbeef1234567890"
     customName="Ferrari SF70H Server Pack"
@@ -146,6 +167,7 @@ message=$(render_template "checksum_failure" \
   "driver=${driver}" \
   "contentType=${contentType}" \
   "contentName=${contentName}" \
+  "requiredFile=${requiredFile}" \
   "failedFile=${failedFile}" \
   "expectedChecksum=${expectedChecksum}" \
   "customName=${customName}" \
@@ -155,7 +177,11 @@ message=$(render_template "checksum_failure" \
   "notes=${notes}")
 
 render_status=$?
-context="${driver} on ${contentName}"
+if [[ -n "${requiredFile}" ]]; then
+  context="${driver} on ${requiredFile}"
+else
+  context="${driver} on ${contentName}"
+fi
 
 if [[ ${render_status} -ne 0 || -z "${message}" ]]; then
   echo "ERROR: Template rendering failed!" >&2
