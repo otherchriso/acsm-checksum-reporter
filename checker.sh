@@ -286,8 +286,8 @@ render_template() {
   # Variable substitution: {{ .varName }} -> value
   for key in "${!vars[@]}"; do
     local value="${vars[$key]}"
-    # Escape special characters in value for sed
-    value=$(echo "${value}" | sed 's/[&/\]/\\&/g')
+    # Escape special characters in value for sed (& / \ and newlines)
+    value=$(printf '%s' "${value}" | sed -e 's/[&/\]/\\&/g' -e 's/$/\\/' | sed '$ s/\\$//')
     template=$(echo "${template}" | sed "s/{{ \.${key} }}/${value}/g")
   done
   
@@ -482,37 +482,36 @@ prepare_checksum_message() {
   if [[ -f "${hintfile}" ]]; then
     notes=$(jq -r '.notes // empty | select(length > 0)' "${hintfile}" \
     | tr '\r\n' ' ' \
-    | sed 's|<a href="\([^"]*\)"[^>]*>\([^<]*\)</a>|__\2__ _(#@!\1!@#)_|g' \
+    | sed 's|<a href="\([^"]*\)"[^>]*>\([^<]*\)</a>|__\2__ _(@LT@\1@GT@)_|g' \
     | sed "s|\"|'|g" \
-    | sed 's|<br>|\\n|g' \
-    | sed 's|<p>|\\n|g' \
-    | sed 's|</p>|\\n|g' \
-    | sed 's|<ul>|\\n|g' \
+    | sed 's|<br>|@NL@|g' \
+    | sed 's|<p>|@NL@|g' \
+    | sed 's|</p>|@NL@|g' \
+    | sed 's|<ul>|@NL@|g' \
     | sed 's|<li>|• |g' \
-    | sed 's|</li>|\\n|g' \
+    | sed 's|</li>|@NL@|g' \
     | sed 's|<[^>]*>||g' \
     | sed 's|&nbsp;| |g' \
-    | sed 's|#@!|<|g' \
-    | sed 's|!@#|>|g' \
-    | sed 's|\\|\\\\|g' \
-    | sed 's|\\\\n|\\n|g' )
+    | sed 's|&gt;|>|g' \
+    | sed 's|&lt;|<|g' \
+    | sed "s|&quot;|\"|g" \
+    | sed 's|&amp;|\&|g' \
+    | sed 's|@LT@|<|g' \
+    | sed 's|@GT@|>|g' )
   fi
 
-  # Strip notes that are effectively empty (null, whitespace, stray newline escapes)
-  local notes_stripped=$(echo "${notes}" | sed 's/\\n//g' | xargs)
-  [[ -z "${notes_stripped}" ]] && notes=""
+  # De-duplicate self-referencing links: __URL__ _(<URL>)_ → <URL>
+  notes=$(echo "${notes}" | sed -E 's|__([^_]+)__ _\(<\1>\)_|<\1>|g')
 
-  # Clean up egregious self-referencing links in notes
-  local revised_line="${notes}"
-  for word in $(echo "${notes}"); do
-    local link=$(echo "${word}" \
-             | egrep -o 'http.*' \
-             | sed 's|\\n$||' \
-             | sed 's|__$||')
-    revised_line=$(echo "${revised_line}" \
-                   | sed "s|__${link}__ _.<${link}>._|<${link}>|g")
-  done
-  notes="${revised_line}"
+  # Convert @NL@ placeholders to real newlines, trim leading/trailing, compress runs
+  notes=$(echo "${notes}" | sed 's|@NL@|\n|g' \
+    | sed '/./,$!d' \
+    | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' \
+    | cat -s)
+
+  # Strip notes that are effectively empty (null, whitespace, stray newline escapes)
+  local notes_stripped=$(echo "${notes}" | xargs)
+  [[ -z "${notes_stripped}" ]] && notes=""
 
   # Look up expected checksum and custom name
   local expectedchecksum=""

@@ -112,7 +112,7 @@ case "${SCENARIO}" in
     downloadURL="https://example.com/spa-mod"
     dlcPack=""
     isOriginalContent=""
-    notes="This is a custom version of Spa with updated surfaces.\nMake sure to download version 2.1 or later."
+    notes='<p>This is a custom version of Spa with updated surfaces.</p><p>Make sure to download version 2.1 or later.</p>'
     ;;
   required-file)
     driver="Driver Zero"
@@ -151,7 +151,7 @@ case "${SCENARIO}" in
     downloadURL="https://www.racedepartment.com/downloads/ferrari-sf70h.54321/"
     dlcPack="Ferrari 70th Anniversary"
     isOriginalContent=""
-    notes="Updated physics for competitive racing.\nVersion must match server exactly."
+    notes='<p>Updated physics for competitive racing.</p><p>Version must match server exactly.</p>'
     ;;
   *)
     echo "Unknown scenario: ${SCENARIO}"
@@ -161,6 +161,11 @@ esac
 
 echo "Testing checksum_failure template with scenario: ${SCENARIO}"
 echo ""
+
+# Parse HTML notes through the same pipeline as checker.sh
+if [[ -n "${notes}" ]]; then
+  notes=$(parse_notes "${notes}")
+fi
 
 # Render the template
 message=$(render_template "checksum_failure" \

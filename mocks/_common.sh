@@ -111,8 +111,8 @@ render_template() {
   # Variable substitution: {{ .varName }} -> value
   for key in "${!vars[@]}"; do
     local value="${vars[$key]}"
-    # Escape special characters in value for sed
-    value=$(echo "${value}" | sed 's/[&/\]/\\&/g')
+    # Escape special characters in value for sed (& / \ and newlines)
+    value=$(printf '%s' "${value}" | sed -e 's/[&/\]/\\&/g' -e 's/$/\\/' | sed '$ s/\\$//')
     template=$(echo "${template}" | sed "s/{{ \.${key} }}/${value}/g")
   done
   
@@ -193,6 +193,48 @@ escape_for_json() {
   # Output is a valid JSON string (with quotes), we strip the quotes
   local escaped=$(echo -n "${input}" | jq -Rs '.' | sed 's/^"//;s/"$//')
   echo "${escaped}"
+}
+
+# Parse HTML notes into Discord-friendly plain text
+# Mirrors the pipeline in checker.sh's prepare_checksum_message()
+# Arguments: $1 = raw HTML notes string
+# Outputs: cleaned plain text via echo
+parse_notes() {
+  local raw="${1}"
+  local notes
+  notes=$(echo "${raw}" \
+    | tr '\r\n' ' ' \
+    | sed 's|<a href="\([^"]*\)"[^>]*>\([^<]*\)</a>|__\2__ _(@LT@\1@GT@)_|g' \
+    | sed "s|\"|'|g" \
+    | sed 's|<br>|@NL@|g' \
+    | sed 's|<p>|@NL@|g' \
+    | sed 's|</p>|@NL@|g' \
+    | sed 's|<ul>|@NL@|g' \
+    | sed 's|<li>|• |g' \
+    | sed 's|</li>|@NL@|g' \
+    | sed 's|<[^>]*>||g' \
+    | sed 's|&nbsp;| |g' \
+    | sed 's|&gt;|>|g' \
+    | sed 's|&lt;|<|g' \
+    | sed "s|&quot;|\"|g" \
+    | sed 's|&amp;|\&|g' \
+    | sed 's|@LT@|<|g' \
+    | sed 's|@GT@|>|g' )
+
+  # De-duplicate self-referencing links: __URL__ _(<URL>)_ → <URL>
+  notes=$(echo "${notes}" | sed -E 's|__([^_]+)__ _\(<\1>\)_|<\1>|g')
+
+  # Convert @NL@ placeholders to real newlines, trim leading/trailing, compress runs
+  notes=$(echo "${notes}" | sed 's|@NL@|\n|g' \
+    | sed '/./,$!d' \
+    | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' \
+    | cat -s)
+
+  # Strip notes that are effectively empty
+  local notes_stripped=$(echo "${notes}" | xargs)
+  [[ -z "${notes_stripped}" ]] && notes=""
+
+  echo "${notes}"
 }
 
 # Send a message to the Discord webhook
