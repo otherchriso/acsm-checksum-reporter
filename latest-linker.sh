@@ -15,7 +15,7 @@ if [[ -z "${serverspath}" ]]; then
 fi
 
 # interval in seconds between polling for log rotation
-checkdelay=10
+checkdelay="${checkdelay:-10}"
 
 while true; do \
 

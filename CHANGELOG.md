@@ -50,6 +50,11 @@ Each detection type can be individually enabled or disabled in `checksum.env`.
 Setting a toggle to `false` still logs the event to the console but skips the
 Discord webhook, useful for noisy event types or during testing.
 
+### Configurable log rotation polling
+
+The interval between checks for new session log files is now configurable via
+`checkdelay` in `checksum.env` (default: 10 seconds).
+
 ### Structured console logging
 
 Every detection is logged with structured fields: server name, trigger type,
