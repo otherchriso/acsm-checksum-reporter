@@ -11,6 +11,11 @@ if ! command -v curl &> /dev/null; then
   exit 1
 fi
 
+if ! command -v perl &> /dev/null; then
+  echo "Error: perl is required but not installed." >&2
+  exit 1
+fi
+
 # Check required config files
 if [[ ! -f checksum.env ]]; then
   echo "Error: checksum.env not found." >&2
@@ -25,19 +30,24 @@ fi
 source checksum.env
 source .secrets
 
+# Default values for legacy fallback mode (when templates not available)
+# These can be overridden in checksum.env but are not advertised
+message_prefix="${message_prefix:-:racing_car: :police_car: :racing_car: :police_car: :racing_car: :police_car:\n}"
+message_suffix="${message_suffix:-}"
+
+# Announcement toggles — default to "true" (log + transmit to Discord)
+# Setting to "false" in checksum.env will log the event but skip the webhook
+announce_checksum_failures="${announce_checksum_failures:-true}"
+announce_session_closed="${announce_session_closed:-true}"
+announce_no_slots="${announce_no_slots:-true}"
+announce_plugin_kicks="${announce_plugin_kicks:-true}"
+announce_ping_kicks="${announce_ping_kicks:-true}"
+announce_idle_kicks="${announce_idle_kicks:-true}"
+announce_no_join_list="${announce_no_join_list:-true}"
+
 # Validate required environment variables
 if [[ -z "${contentpath}" ]]; then
   echo "Error: contentpath is not set in checksum.env." >&2
-  exit 1
-fi
-
-if [[ -z "${message_prefix}" ]]; then
-  echo "Error: message_prefix is not set in checksum.env." >&2
-  exit 1
-fi
-
-if [[ -z "${message_suffix}" ]]; then
-  echo "Error: message_suffix is not set in checksum.env." >&2
   exit 1
 fi
 
@@ -59,6 +69,15 @@ fi
 
 watchedlog="${1}"
 
+# Derive a short server name from the log path
+# e.g. /opt/acsm/server/servers/SERVER_00/assetto/logs/session/latest.log -> SERVER_00
+server_name=$(echo "${watchedlog}" | grep -oP 'servers/\K[^/]+')
+server_name="${server_name:-unknown}"
+
+# Structured log helpers
+log_info() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] [INFO] [${server_name}] $*" >&2; }
+log_warn() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] [WARN] [${server_name}] $*" >&2; }
+
 # Check log file exists and is readable
 if [[ ! -f "${watchedlog}" ]]; then
   echo "Error: Log file '${watchedlog}' not found." >&2
@@ -70,127 +89,717 @@ if [[ ! -r "${watchedlog}" ]]; then
   exit 1
 fi
 
-tail -Fn0 "${watchedlog}" 2>&1 | \
-while read -r line; do
+# Template directory (default: ./templates)
+templates_path="${templates_path:-./templates}"
 
-  # we see the second line with reason: Checksum failed
-  if [[ $(echo "${line}" | egrep -c 'Kicking.*Checksum failed') -gt 0 ]]
-  then
-    # this assumes we didn't unluckily land halfway through a kicking 
-    # which would be super dooper unlikely but still...
-    keypart=$(echo "${linebefore}" | awk -F '"' '{print $2".*"$4}' | sed "s/'/.*/g" | sed 's/[-+]..:../.*/') 
+# Validate template syntax
+# Arguments: $1 = template file path
+# Returns: 0 if valid, 1 if errors found (errors printed to stderr)
+validate_template_syntax() {
+  local template_file="${1}"
+  local errors=0
+  
+  if [[ ! -f "${template_file}" ]]; then
+    echo "Error: Template file '${template_file}' not found" >&2
+    return 1
+  fi
+  
+  local content=$(cat "${template_file}")
+  
+  # Check for balanced {{ and }}
+  local open_count=$(echo "${content}" | grep -o '{{' | wc -l)
+  local close_count=$(echo "${content}" | grep -o '}}' | wc -l)
+  if [[ "${open_count}" -ne "${close_count}" ]]; then
+    echo "Error: Unbalanced {{ }} in ${template_file} (${open_count} open, ${close_count} close)" >&2
+    errors=1
+  fi
+  
+  # Check for unclosed if blocks (count {{ if vs {{ end }})
+  local if_count=$(echo "${content}" | grep -oE '\{\{ if ' | wc -l)
+  local end_count=$(echo "${content}" | grep -oE '\{\{ end \}\}' | wc -l)
+  if [[ "${if_count}" -ne "${end_count}" ]]; then
+    echo "Error: Mismatched if/end blocks in ${template_file} (${if_count} if, ${end_count} end)" >&2
+    errors=1
+  fi
+  
+  # Check for include directives pointing to missing files
+  local includes=$(echo "${content}" | grep -oE '\{\{ include "[^"]*" \}\}' | sed 's/{{ include "//g' | sed 's/" }}//g')
+  for inc in ${includes}; do
+    if [[ ! -f "${templates_path}/${inc}" ]]; then
+      echo "Error: Included template '${inc}' not found in ${template_file}" >&2
+      errors=1
+    fi
+  done
+  
+  return ${errors}
+}
 
-    details=$(egrep -A1 "${keypart}" "${watchedlog}" \
-              | sed -z 's/\n/|/' \
-              | awk -F '"' '{print $4,$8}' )
+# Validate all templates on startup
+# Returns: 0 if all valid, 1 if any errors (continues checking all templates)
+validate_templates() {
+  local errors=0
+  
+  if [[ ! -d "${templates_path}" ]]; then
+    # Templates directory doesn't exist - using legacy mode
+    return 0
+  fi
+  
+  for tmpl in "${templates_path}"/*.tmpl; do
+    if [[ -f "${tmpl}" ]]; then
+      if ! validate_template_syntax "${tmpl}"; then
+        errors=1
+      fi
+    fi
+  done
+  
+  if [[ "${errors}" -ne 0 ]]; then
+    echo "Warning: Template validation found errors. Messages may not render correctly." >&2
+  fi
+  
+  return ${errors}
+}
 
-    driver=$(echo "${details}" \
-             | egrep -o 'Name[^,]*' \
-             | sed 's/Name: //')
+# Validate templates at startup (non-fatal - just warns)
+validate_templates
 
-    contenttype=$(echo "${details}" \
-                  | awk -F'/' '{print $2}' \
-                  | sed 's/s//')
+# Resolve the shared store path from ACSM config
+# Returns: path to shared store directory (without trailing slash)
+resolve_shared_store_path() {
+  local config_path="${acsm_config_path:-}"
+  local shared_path=""
+  
+  if [[ -n "${config_path}" && -f "${config_path}" ]]; then
+    # Try to extract shared_data_path from config.yml
+    shared_path=$(grep -E '^\s*shared_data_path:' "${config_path}" 2>/dev/null | awk '{print $2}' | tr -d '"' | tr -d "'")
+  fi
+  
+  # If empty or not found, use default relative to config directory
+  if [[ -z "${shared_path}" ]]; then
+    if [[ -n "${config_path}" ]]; then
+      local config_dir=$(dirname "${config_path}")
+      shared_path="${config_dir}/shared_store.json"
+    else
+      # Fallback: try common locations
+      shared_path=""
+    fi
+  fi
+  
+  echo "${shared_path}"
+}
 
-    contentname=$(echo "${details}" \
-                  | awk -F'/' '{print $3}')
+# Look up expected checksum for a failed file
+# Arguments: $1 = failed file path, $2 = hintfile (content metadata JSON)
+# Outputs: checksum string (or empty if not found)
+lookup_expected_checksum() {
+  local failed_file="${1}"
+  local hintfile="${2}"
+  local checksum=""
+  
+  # Content checksums (cars/tracks) - look in metadata .checksums array
+  if [[ "${failed_file}" =~ ^content/(cars|tracks)/ && -f "${hintfile}" ]]; then
+    checksum=$(jq -r --arg fp "${failed_file}" \
+      '.checksums[]? | select(.filepath == $fp) | .checksum // empty' \
+      "${hintfile}" 2>/dev/null)
+  fi
+  
+  echo "${checksum}"
+}
 
+# Look up custom checksum entry (for non-content files like apps, dlls)
+# Arguments: $1 = failed file path
+# Outputs: "name|checksum" (pipe-separated) or empty if not found
+lookup_custom_checksum() {
+  local failed_file="${1}"
+  local result=""
+  
+  local shared_path=$(resolve_shared_store_path)
+  local custom_checksums_file="${shared_path}/custom_checksums.json"
+  
+  if [[ -n "${shared_path}" && -f "${custom_checksums_file}" ]]; then
+    # Extract both name and checksum for the matching entry
+    result=$(jq -r --arg fp "${failed_file}" \
+      '.entries[]? | select(.filepath == $fp) | "\(.name // "")|\(.checksum // "")"' \
+      "${custom_checksums_file}" 2>/dev/null)
+  fi
+  
+  echo "${result}"
+}
 
-    # Initialise the message 
-    message="${message_prefix}\n"
-
-    # Who, what, where
-    message="${message}\nChecksum failed for **"${driver}"** on "${contenttype}" **"${contentname}"**"
-
-    # Now for some more info
-    [[ ${contenttype} == "track" ]] && hintfile="${contentpath}${contenttype}s/${contentname}/ui/meta_data.json"
-    [[ ${contenttype} == "car" ]] && hintfile="${contentpath}${contenttype}s/${contentname}/ui/ui_car.json"
+# Render a template with variable substitution and conditional blocks
+# Arguments: $1 = template name (without .tmpl extension)
+#            Remaining args: key=value pairs for variables
+# Outputs: rendered template via echo
+render_template() {
+  local template_name="${1}"
+  shift
+  local template_file="${templates_path}/${template_name}.tmpl"
+  
+  # Check if template exists, fall back to legacy behaviour if not
+  if [[ ! -f "${template_file}" ]]; then
+    echo "Warning: Template '${template_file}' not found, using legacy format" >&2
+    return 1
+  fi
+  
+  local template=$(cat "${template_file}")
+  
+  # Process {{ include "filename.tmpl" }} directives
+  # Use a loop to handle nested includes (max 10 iterations to prevent infinite loops)
+  local include_iterations=0
+  while [[ "${template}" =~ \{\{\ include\ \"([^\"]+)\"\ \}\} && ${include_iterations} -lt 10 ]]; do
+    local include_match="${BASH_REMATCH[0]}"
+    local include_file="${BASH_REMATCH[1]}"
+    local include_path="${templates_path}/${include_file}"
     
-    # Check if hintfile exists before reading
-    if [[ -f "${hintfile}" ]]; then
-      downloadurl=$(jq -r .downloadURL "${hintfile}" | xargs)
+    if [[ -f "${include_path}" ]]; then
+      local include_content=$(cat "${include_path}")
+      # Use bash string replacement (handles multi-line content properly)
+      template="${template//"{{ include \"${include_file}\" }}"/${include_content}}"
     else
-      downloadurl=""
+      echo "Warning: Include file '${include_path}' not found" >&2
+      # Remove the include directive to prevent infinite loop
+      template="${template//"{{ include \"${include_file}\" }}"/}"
     fi
-
-    # Is this content part of a DLC pack?
-    if [[ -f dlc ]]; then
-      dlc="$(jq -r .${contentname} dlc)"
-    else
-      dlc=""
+    ((include_iterations++))
+  done
+  
+  # Strip comments: {{/* ... */}} (supports multi-line)
+  # Done after includes so comments in included files are also stripped
+  template=$(perl -0777 -pe 's/\{\{\/\*.*?\*\/\}\}//gs' <<< "${template}")
+  
+  # Build associative array of variables (bash 4+)
+  declare -A vars
+  local var_list=""
+  local var_values=""
+  for arg in "$@"; do
+    local key="${arg%%=*}"
+    local value="${arg#*=}"
+    vars["${key}"]="${value}"
+    # Track non-empty variables for conditional processing
+    if [[ -n "${value}" ]]; then
+      var_list="${var_list}${key},"
+      # Build key=value pairs for equality checks (escape | in values)
+      local escaped_value=$(echo "${value}" | sed 's/|/\\|/g')
+      var_values="${var_values}${key}=${escaped_value}|"
     fi
-    [[ ${#dlc} -gt 5 ]] \
-    && message="${message}\n\n${contentname} is available with the **${dlc}** DLC." \
-    || /bin/true
+  done
+  
+  # Variable substitution: {{ .varName }} -> value
+  for key in "${!vars[@]}"; do
+    local value="${vars[$key]}"
+    # Escape special characters in value for sed (& / \ and newlines)
+    value=$(printf '%s' "${value}" | sed -e 's/[&/\]/\\&/g' -e 's/$/\\/' | sed '$ s/\\$//')
+    template=$(echo "${template}" | sed "s/{{ \.${key} }}/${value}/g")
+  done
+  
+  # Process conditional blocks using perl
+  # Pass variable names and values via environment
+  # Key: process innermost blocks first (those without nested {{ if) to handle nesting
+  template=$(TMPL_VARS="${var_list}" TMPL_VALUES="${var_values}" perl -0777 -pe '
+    my %set_vars = map { $_ => 1 } split /,/, $ENV{"TMPL_VARS"};
+    
+    # Parse variable values for equality comparisons
+    my %var_values;
+    for my $pair (split /\|/, $ENV{"TMPL_VALUES"}) {
+      if ($pair =~ /^([^=]+)=(.*)$/) {
+        $var_values{$1} = $2;
+      }
+    }
+    
+    # Helper to evaluate a condition and return replacement
+    sub eval_block {
+      my ($condition, $block, $set_vars_ref, $var_values_ref) = @_;
+      my $replacement = "";
+      my $result = 0;
+      
+      # Parse condition type
+      if ($condition =~ /^eq \.(\w+) "([^"]*)"$/) {
+        my ($var, $cmp) = ($1, $2);
+        $result = (($var_values_ref->{$var} // "") eq $cmp);
+      } elsif ($condition =~ /^ne \.(\w+) "([^"]*)"$/) {
+        my ($var, $cmp) = ($1, $2);
+        $result = (($var_values_ref->{$var} // "") ne $cmp);
+      } elsif ($condition =~ /^not \.(\w+)$/) {
+        my $var = $1;
+        $result = !$set_vars_ref->{$var};
+      } elsif ($condition =~ /^\.(\w+)$/) {
+        my $var = $1;
+        $result = $set_vars_ref->{$var};
+      }
+      
+      # Handle else clause
+      if ($block =~ /^(.*?)\{\{ else \}\}(.*)$/s) {
+        $replacement = $result ? $1 : $2;
+      } else {
+        $replacement = $result ? $block : "";
+      }
+      return $replacement;
+    }
+    
+    # Process innermost blocks first (those without nested {{ if inside)
+    # Repeat until no more matches - this handles arbitrary nesting depth
+    my $changed = 1;
+    while ($changed) {
+      $changed = 0;
+      
+      # Match {{ if CONDITION }}BLOCK{{ end }} where BLOCK contains no {{ if
+      if (s/\{\{ if ((?:eq |ne |not )?\.(\w+)(?: "[^"]*")?) \}\}((?:(?!\{\{ if )(?!\{\{ end \}\}).)*?)\{\{ end \}\}/
+          eval_block($1, $3, \%set_vars, \%var_values)/es) {
+        $changed = 1;
+      }
+    }
+  ' <<< "${template}")
+  
+  # Clean up any remaining unsubstituted variables (replace with empty)
+  template=$(echo "${template}" | sed 's/{{ \.[a-zA-Z]*}}//g')
+  
+  # Clean up multiple consecutive blank lines
+  template=$(echo "${template}" | cat -s)
+  
+  echo "${template}"
+}
 
-    # Check for any notes about this content.
-    # This is a rich text field, so... there be dragons.
-    # Since Discord somehow can't handle hyperlinks which the WWW has had since 1988
-    # we will convert links to "__text__ _(title)_" format, 
-    # then create some line breaks, and strip as much other HTML as we can
-    if [[ -f "${hintfile}" ]]; then
-      notes=$(jq -r .notes "${hintfile}" \
-      | tr '\r\n' ' ' \
-      | sed 's|<a href="\([^"]*\)"[^>]*>\([^<]*\)</a>|__\2__ _(#@!\1!@#)_|g' \
-      | sed "s|\"|'|g" \
-      | sed 's|<br>|\\n|g' \
-      | sed 's|<p>|\\n|g' \
-      | sed 's|</p>|\\n|g' \
-      | sed 's|<ul>|\\n|g' \
-      | sed 's|<li>|• |g' \
-      | sed 's|</li>|\\n|g' \
-      | sed 's|<[^>]*>||g' \
-      | sed 's|&nbsp;| |g' \
-      | sed 's|#@!|<|g' \
-      | sed 's|!@#|>|g' \
-      | sed 's|\\|\\\\|g' \
-      | sed 's|\\\\n|\\n|g' )
-    else
-      notes=""
-    fi
+# Escape a string for safe embedding in JSON
+# Arguments: $1 = string to escape
+# Outputs: escaped string via echo
+escape_for_json() {
+  local input="${1}"
+  # Use jq to properly escape the string for JSON
+  # The -Rs flags: -R reads raw input, -s slurps into single string
+  # Output is a valid JSON string (with quotes), we strip the quotes
+  local escaped=$(echo -n "${input}" | jq -Rs '.' | sed 's/^"//;s/"$//')
+  echo "${escaped}"
+}
 
-    # sometimes an empty save results in "<p><br></p>" so let's deal with that
-    [[ "${notes}" == "\n\n\n" ]] && notes=""
+# Map trigger names to their announce toggle variable names
+# Arguments: $1 = trigger name
+# Outputs: the value of the corresponding announce_* variable
+get_announce_toggle() {
+  case "${1}" in
+    checksum_failure) echo "${announce_checksum_failures}" ;;
+    session_closed)   echo "${announce_session_closed}" ;;
+    no_slots)         echo "${announce_no_slots}" ;;
+    plugin_kick)      echo "${announce_plugin_kicks}" ;;
+    ping_kick)        echo "${announce_ping_kicks}" ;;
+    idle_kick)        echo "${announce_idle_kicks}" ;;
+    no_join_list)     echo "${announce_no_join_list}" ;;
+    *)                echo "true" ;;
+  esac
+}
 
-    # stash this in a variable we are about to manipulate
-    revised_line="${notes}"
+# Send a message to the Discord webhook
+# Arguments: $1 = message, $2 = context for error logging, $3 = trigger name, $4 = GUID (optional)
+send_webhook() {
+  local message="${1}"
+  local context="${2}"
+  local trigger="${3:-unknown}"
+  local guid="${4:-}"
 
-    for word in $(echo "${notes}"); do
-      # store any occurence of http[^ ]* into a variable "link"
-      link=$(echo "${word}" \
-               | egrep -o 'http.*' \
-               | sed 's|\\n$||' \
-               | sed 's|__$||')
-      # it is likely long URIs are sometimes hyperlinked as themselves in the notes
-      # making for an extremely ugly presentation in Discord
-      # referencing the formatting we built into the $notes definition above...
-      # replace any occurrences of "__link__ _(link)_" with simply "link"
-      revised_line=$(echo "${revised_line}" \
-                     | sed "s|__${link}__ _.<${link}>._|<${link}>|g")
-    done
+  if [[ -z "${message}" ]]; then
+    return
+  fi
 
-    # Now that we have cleaned up any egregious links
-    # let's update that main notes variable
-    notes="${revised_line}"
+  local guid_field=""
+  [[ -n "${guid}" ]] && guid_field=" guid=${guid}"
 
-    [[ ${#downloadurl} -gt 5 ]] \
-    && message="${message}\n\n**Content download:**\n<${downloadurl}>\n" \
-    || message="${message}\n\nWe don't have a download link for that. If the content is stock or DLC, make sure you have installed it, and verify your game files in Steam.\n"
+  # Check if this trigger type is enabled for Discord transmission
+  local announce=$(get_announce_toggle "${trigger}")
+  if [[ "${announce}" != "true" ]]; then
+    log_info "trigger=${trigger} driver=\"${context}\"${guid_field} status=- result=suppressed"
+    return
+  fi
 
-    [[ ${#notes} -gt 3 ]] \
-    && message="${message}\n**Important notes:**\n${notes}" \
-    || /bin/true
+  # Escape message content for JSON
+  local escaped_message=$(escape_for_json "${message}")
+  local escaped_bot_name=$(escape_for_json "${bot_name}")
+  
+  local payload='{"username": "'"${escaped_bot_name}"'", "content": "'"${escaped_message}"'"}'
 
+  local http_status
+  http_status=$(curl -s -o /dev/null -w "%{http_code}" -H "Content-Type: application/json" -d "${payload}" "${webhookurl}")
+  if [[ "${http_status}" =~ ^2 ]]; then
+    log_info "trigger=${trigger} driver=\"${context}\"${guid_field} status=${http_status} result=sent"
+  else
+    log_warn "trigger=${trigger} driver=\"${context}\"${guid_field} status=${http_status} result=failed"
+  fi
+}
 
-    message="${message}\n${message_suffix}"
+# Prepare message for checksum validation failure
+# Arguments: $1 = the warning line (contains the failed file path)
+#            $2 = the Kicking line (contains driver name, GUID, model)
+# Outputs: message via echo
+prepare_checksum_message() {
+  local warningline="${1}"
+  local kickline="${2}"
+  local message=""
 
-    payload='{"username": "'${bot_name}'", "content": "'${message}'"}'
+  # Extract driver name from the Kicking line: Name: <name>,
+  local driver=$(echo "${kickline}" | sed -n 's/.*Name: \([^,]*\),.*/\1/p' | xargs)
 
-    if [[ -n "${message}" ]]; then
-      if ! curl -sf -H "Content-Type: application/json" -d "${payload}" "${webhookurl}"; then
-        echo "Warning: Failed to send webhook notification for ${driver} on ${contentname}" >&2
+  # Extract the failed file path from the warning line:
+  # Car: N failed checksum on file '<path>'. Kicking from server.
+  local failedfile=$(echo "${warningline}" | sed -n "s/.*on file '\([^']*\)'.*/\1/p")
+
+  # Classify the path: content/cars/... -> car, content/tracks/... -> track,
+  # anything else -> required file (apps, plugins, system files, etc.)
+  local contenttype=""
+  local contentname=""
+  local requiredfile=""
+
+  if [[ "${failedfile}" =~ ^content/cars/ ]]; then
+    contenttype="car"
+    contentname=$(echo "${failedfile}" | awk -F'/' '{print $3}')
+  elif [[ "${failedfile}" =~ ^content/tracks/ ]]; then
+    contenttype="track"
+    contentname=$(echo "${failedfile}" | awk -F'/' '{print $3}')
+  else
+    # Required file — show the basename as the most useful identifier
+    requiredfile=$(basename "${failedfile}")
+  fi
+
+  # Now for some more info
+  local hintfile=""
+  [[ "${contenttype}" == "track" ]] && hintfile="${contentpath}${contenttype}s/${contentname}/ui/meta_data.json"
+  [[ "${contenttype}" == "car" ]] && hintfile="${contentpath}${contenttype}s/${contentname}/ui/ui_car.json"
+  
+  # Check if hintfile exists before reading
+  local downloadurl=""
+  if [[ -f "${hintfile}" ]]; then
+    downloadurl=$(jq -r '.downloadURL // empty | select(length > 0)' "${hintfile}" | xargs)
+  fi
+
+  # Is this content part of a DLC pack or original game content?
+  local dlc=""
+  local is_original_content=""
+  if [[ -f original_content ]]; then
+    dlc="$(jq -r --arg key "${contentname}" '.[$key] // empty' original_content)"
+  fi
+  # Track original content, then clean up to keep only actual DLC pack names
+  [[ "${dlc}" == "Default content" ]] && is_original_content="true"
+  [[ "${dlc}" == "Default content" || ${#dlc} -lt 5 ]] && dlc=""
+
+  # Check for any notes about this content.
+  local notes=""
+  if [[ -f "${hintfile}" ]]; then
+    notes=$(jq -r '.notes // empty | select(length > 0)' "${hintfile}" \
+    | tr '\r\n' ' ' \
+    | sed 's|<a href="\([^"]*\)"[^>]*>\([^<]*\)</a>|__\2__ _(@LT@\1@GT@)_|g' \
+    | sed "s|\"|'|g" \
+    | sed 's|<br>|@NL@|g' \
+    | sed 's|<p>|@NL@|g' \
+    | sed 's|</p>|@NL@|g' \
+    | sed 's|<ul>|@NL@|g' \
+    | sed 's|<li>|• |g' \
+    | sed 's|</li>|@NL@|g' \
+    | sed 's|<[^>]*>||g' \
+    | sed 's|&nbsp;| |g' \
+    | sed 's|&gt;|>|g' \
+    | sed 's|&lt;|<|g' \
+    | sed "s|&quot;|\"|g" \
+    | sed 's|&amp;|\&|g' \
+    | sed 's|@LT@|<|g' \
+    | sed 's|@GT@|>|g' )
+  fi
+
+  # De-duplicate self-referencing links: __URL__ _(<URL>)_ → <URL>
+  notes=$(echo "${notes}" | sed -E 's|__([^_]+)__ _\(<\1>\)_|<\1>|g')
+
+  # Convert @NL@ placeholders to real newlines, trim leading/trailing, compress runs
+  notes=$(echo "${notes}" | sed 's|@NL@|\n|g' \
+    | sed '/./,$!d' \
+    | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' \
+    | cat -s)
+
+  # Strip notes that are effectively empty (null, whitespace, stray newline escapes)
+  local notes_stripped=$(echo "${notes}" | xargs)
+  [[ -z "${notes_stripped}" ]] && notes=""
+
+  # Look up expected checksum and custom name
+  local expectedchecksum=""
+  local customname=""
+  
+  if [[ -n "${failedfile}" ]]; then
+    # Try content metadata first
+    expectedchecksum=$(lookup_expected_checksum "${failedfile}" "${hintfile}")
+    
+    # If not in content metadata, check custom checksums
+    if [[ -z "${expectedchecksum}" ]]; then
+      local custom_result=$(lookup_custom_checksum "${failedfile}")
+      if [[ -n "${custom_result}" ]]; then
+        customname="${custom_result%|*}"
+        expectedchecksum="${custom_result#*|}"
       fi
     fi
   fi
+
+  # Try to render from template
+  message=$(render_template "checksum_failure" \
+    "driver=${driver}" \
+    "contentType=${contenttype}" \
+    "contentName=${contentname}" \
+    "requiredFile=${requiredfile}" \
+    "failedFile=${failedfile}" \
+    "expectedChecksum=${expectedchecksum}" \
+    "customName=${customname}" \
+    "downloadURL=${downloadurl}" \
+    "dlcPack=${dlc}" \
+    "isOriginalContent=${is_original_content}" \
+    "notes=${notes}")
+  
+  # Fall back to legacy format if template rendering failed
+  if [[ $? -ne 0 || -z "${message}" ]]; then
+    message="${message_prefix}\n"
+    if [[ -n "${requiredfile}" ]]; then
+      message="${message}\nChecksum failed for **${driver}** on required file **${requiredfile}**"
+    else
+      message="${message}\nChecksum failed for **${driver}** on ${contenttype} **${contentname}**"
+    fi
+    [[ -n "${dlc}" ]] && message="${message}\n\n${contentname} is available with the **${dlc}** DLC."
+    [[ ${#downloadurl} -gt 5 ]] \
+    && message="${message}\n\n**Content download:**\n<${downloadurl}>\n" \
+    || message="${message}\n\nWe don't have a download link for that. If the content is stock or DLC, make sure you have installed it, and verify your game files in Steam.\n"
+    [[ ${#notes} -gt 3 ]] && message="${message}\n**Important notes:**\n${notes}"
+    message="${message}\n${message_suffix}"
+  fi
+
+  # Return the message and context (driver on contentname or requiredfile)
+  if [[ -n "${requiredfile}" ]]; then
+    echo "${message}|${driver} on ${requiredfile}"
+  else
+    echo "${message}|${driver} on ${contentname}"
+  fi
+}
+
+# Prepare message for session closed rejection
+# Arguments: $1 = the log line containing the rejection
+# Outputs: message via echo
+prepare_session_closed_message() {
+  local logline="${1}"
+  local message=""
+
+  # Extract driver name from: Driver: John Smith (76561198012345678) tried to join
+  local driver=$(echo "${logline}" | sed -n 's/.*Driver: \([^(]*\)(.*/\1/p' | xargs)
+
+  # Try to render from template
+  message=$(render_template "session_closed" "driver=${driver}")
+  
+  # Fall back to legacy format if template rendering failed
+  if [[ $? -ne 0 || -z "${message}" ]]; then
+    message="${message_prefix}\n"
+    message="${message}\nJoining was blocked for **${driver}** because the current session is closed. \n\nDepending on the server configuration, it _might_ be possible to join when the session ends, e.g. after qualifying but before the race."
+    message="${message}\n${message_suffix}"
+  fi
+
+  # Return the message and context
+  echo "${message}|${driver}"
+}
+
+# Prepare message for no available slots rejection
+# Arguments: $1 = the log line containing the rejection
+# Outputs: message via echo
+prepare_no_slots_message() {
+  local logline="${1}"
+  local message=""
+
+  # Extract driver name from: Could not connect driver (<name>/<guid>) to car.
+  local driver=$(echo "${logline}" | sed -n 's/.*Could not connect driver (\([^/]*\)\/.*/\1/p' | xargs)
+
+  # Try to render from template
+  message=$(render_template "no_slots" "driver=${driver}")
+  
+  # Fall back to legacy format if template rendering failed
+  if [[ $? -ne 0 || -z "${message}" ]]; then
+    message="${message_prefix}\n"
+    message="${message}\nJoining was blocked (handshake failure) for **${driver}** because the server only accepts assigned drivers at the moment. Check if it's still possible to _register_ for the event, which might permit entry after the next full server restart."
+    message="${message}\n${message_suffix}"
+  fi
+
+  # Return the message and context
+  echo "${message}|${driver}"
+}
+
+# Prepare message for UDP plugin kick
+# Arguments: $1 = the log line containing the kick
+# Outputs: message via echo
+prepare_plugin_kick_message() {
+  local logline="${1}"
+  local message=""
+
+  # Extract driver name from: Kicking: CarID: <int>, Name: <name>, GUID: <guid>
+  local driver=$(echo "${logline}" | sed -n 's/.*Name: \([^,]*\),.*/\1/p' | xargs)
+
+  # Try to render from template
+  message=$(render_template "plugin_kick" "driver=${driver}")
+  
+  # Fall back to legacy format if template rendering failed
+  if [[ $? -ne 0 || -z "${message}" ]]; then
+    message="${message_prefix}\n"
+    message="${message}\nDriver **${driver}** was kicked by a server plugin. Check you have met the requirements and are following all the rules."
+    message="${message}\n${message_suffix}"
+  fi
+
+  # Return the message and context
+  echo "${message}|${driver}"
+}
+
+# Prepare message for ping limit kick
+# Arguments: $1 = the log line containing the kick
+# Outputs: message via echo
+prepare_ping_kick_message() {
+  local logline="${1}"
+  local message=""
+
+  # Extract driver name from: Kicking: CarID: <int>, Name: <name>, GUID: <guid>, Model: <car>, reason: Exceeded Ping Limit
+  local driver=$(echo "${logline}" | sed -n 's/.*Name: \([^,]*\),.*/\1/p' | xargs)
+
+  # Try to render from template
+  message=$(render_template "ping_kick" "driver=${driver}")
+  
+  # Fall back to legacy format if template rendering failed
+  if [[ $? -ne 0 || -z "${message}" ]]; then
+    message="${message_prefix}\n"
+    message="${message}\nDriver **${driver}** was automatically kicked for exceeding the server's ping limit."
+    message="${message}\n${message_suffix}"
+  fi
+
+  # Return the message and context
+  echo "${message}|${driver}"
+}
+
+# Prepare message for idle kick
+# Arguments: $1 = the log line containing the kick
+# Outputs: message via echo
+prepare_idle_kick_message() {
+  local logline="${1}"
+  local message=""
+
+  # Extract driver name from: Kicking: CarID: <int>, Name: <name>, GUID: <guid>, Model: <car>, reason: For Idling
+  local driver=$(echo "${logline}" | sed -n 's/.*Name: \([^,]*\),.*/\1/p' | xargs)
+
+  # Try to render from template
+  message=$(render_template "idle_kick" "driver=${driver}")
+  
+  # Fall back to legacy format if template rendering failed
+  if [[ $? -ne 0 || -z "${message}" ]]; then
+    message="${message_prefix}\n"
+    message="${message}\nDriver **${driver}** was kicked because they were idle for too long."
+    message="${message}\n${message_suffix}"
+  fi
+
+  # Return the message and context
+  echo "${message}|${driver}"
+}
+
+# Prepare message for no join list rejection (previously kicked this session)
+# Arguments: $1 = the log line containing the rejection
+# Outputs: message via echo
+prepare_no_join_list_message() {
+  local logline="${1}"
+  local message=""
+
+  # Extract driver name from: Driver: <name> (<guid>) was rejected as their guid is in the no join list
+  local driver=$(echo "${logline}" | sed -n 's/.*Driver: \([^(]*\)(.*/\1/p' | xargs)
+
+  # Try to render from template
+  message=$(render_template "no_join_list" "driver=${driver}")
+  
+  # Fall back to legacy format if template rendering failed
+  if [[ $? -ne 0 || -z "${message}" ]]; then
+    message="${message_prefix}\n"
+    message="${message}\nDriver **${driver}** was rejected because they were previously kicked during this session."
+    message="${message}\n${message_suffix}"
+  fi
+
+  # Return the message and context
+  echo "${message}|${driver}"
+}
+
+log_info "checker started, watching ${watchedlog}"
+
+# Report any suppressed announcement types at startup
+suppressed=""
+[[ "${announce_checksum_failures}" != "true" ]] && suppressed="${suppressed} checksum_failure"
+[[ "${announce_session_closed}" != "true" ]]    && suppressed="${suppressed} session_closed"
+[[ "${announce_no_slots}" != "true" ]]          && suppressed="${suppressed} no_slots"
+[[ "${announce_plugin_kicks}" != "true" ]]      && suppressed="${suppressed} plugin_kick"
+[[ "${announce_ping_kicks}" != "true" ]]        && suppressed="${suppressed} ping_kick"
+[[ "${announce_idle_kicks}" != "true" ]]        && suppressed="${suppressed} idle_kick"
+[[ "${announce_no_join_list}" != "true" ]]      && suppressed="${suppressed} no_join_list"
+if [[ -n "${suppressed}" ]]; then
+  log_info "suppressed announcements:${suppressed}"
+fi
+
+tail -Fn0 "${watchedlog}" 2>&1 | \
+while read -r line; do
+
+  # Skip debug-level lines — these are controlled by an ACSM env var and
+  # should never influence our detection pipeline
+  [[ "${line}" =~ level=debug ]] && continue
+
+  message=""
+
+  # Detection: Checksum validation failure
+  # The warning line (linebefore) has the file path, the Kicking line has driver/GUID
+  if [[ $(echo "${line}" | egrep -c 'Kicking.*Checksum failed') -gt 0 ]]; then
+    result=$(prepare_checksum_message "${linebefore}" "${line}")
+    message="${result%|*}"
+    context="${result#*|}"
+    guid=$(echo "${line}" | grep -oP 'GUID: \K[0-9]+')
+    send_webhook "${message}" "${context}" "checksum_failure" "${guid}"
+
+  # Detection: Session closed rejection
+  # GUID is in parentheses: Driver: Name (GUID) tried to join
+  elif [[ $(echo "${line}" | egrep -c 'tried to join but was rejected as current session is closed') -gt 0 ]]; then
+    result=$(prepare_session_closed_message "${line}")
+    message="${result%|*}"
+    context="${result#*|}"
+    guid=$(echo "${line}" | grep -oP '\(\K[0-9]+(?=\))')
+    send_webhook "${message}" "${context}" "session_closed" "${guid}"
+
+  # Detection: No available slots (assigned drivers only, unoccupied driver swap slot)
+  # GUID is after the slash: Could not connect driver (Name/GUID)
+  elif [[ $(echo "${line}" | egrep -c 'Could not connect driver.*no available slots') -gt 0 ]]; then
+    result=$(prepare_no_slots_message "${line}")
+    message="${result%|*}"
+    context="${result#*|}"
+    guid=$(echo "${line}" | grep -oP 'driver \([^/]*/\K[0-9]+(?=\))')
+    send_webhook "${message}" "${context}" "no_slots" "${guid}"
+
+  # Detection: Kicked by UDP plugin (e.g. Real Penalty, KMR, stracker)
+  # GUID field: GUID: <digits>
+  elif [[ $(echo "${line}" | egrep -c 'Kicking:.*reason: UDP Plugin') -gt 0 ]]; then
+    result=$(prepare_plugin_kick_message "${line}")
+    message="${result%|*}"
+    context="${result#*|}"
+    guid=$(echo "${line}" | grep -oP 'GUID: \K[0-9]+')
+    send_webhook "${message}" "${context}" "plugin_kick" "${guid}"
+
+  # Detection: Kicked for exceeding ping limit
+  # GUID field: GUID: <digits>
+  elif [[ $(echo "${line}" | egrep -c 'Kicking:.*reason: Exceeded Ping Limit') -gt 0 ]]; then
+    result=$(prepare_ping_kick_message "${line}")
+    message="${result%|*}"
+    context="${result#*|}"
+    guid=$(echo "${line}" | grep -oP 'GUID: \K[0-9]+')
+    send_webhook "${message}" "${context}" "ping_kick" "${guid}"
+
+  # Detection: Kicked for idling
+  # GUID field: GUID: <digits>
+  elif [[ $(echo "${line}" | egrep -c 'Kicking:.*reason: For Idling') -gt 0 ]]; then
+    result=$(prepare_idle_kick_message "${line}")
+    message="${result%|*}"
+    context="${result#*|}"
+    guid=$(echo "${line}" | grep -oP 'GUID: \K[0-9]+')
+    send_webhook "${message}" "${context}" "idle_kick" "${guid}"
+
+  # Detection: Rejected due to no join list (previously kicked this session)
+  # GUID is in parentheses: Driver: Name (GUID) was rejected
+  elif [[ $(echo "${line}" | egrep -c 'was rejected as their guid is in the no join list') -gt 0 ]]; then
+    result=$(prepare_no_join_list_message "${line}")
+    message="${result%|*}"
+    context="${result#*|}"
+    guid=$(echo "${line}" | grep -oP '\(\K[0-9]+(?=\))')
+    send_webhook "${message}" "${context}" "no_join_list" "${guid}"
+  fi
+
   linebefore="${line}"
 done

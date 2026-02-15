@@ -1,0 +1,6 @@
+{{ include "_header.tmpl" }}
+:no_entry: **Session Closed**
+
+Joining was blocked for **{{ .driver }}** because the current session is closed (likely handshake failure).
+
+Depending on the server configuration, it _might_ be possible to join when the session ends, e.g. after qualifying but before the race.
