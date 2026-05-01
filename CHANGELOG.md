@@ -1,5 +1,11 @@
 # Changelog
 
+## V2.0.1
+
+A small patch that does a better job of handling content notes containing URLs which aren't formatted formally as hyperlinks. We defeat Discord's automatic return of OpenGraph previews by wrapping things detected as URLs in `<` and `>` to save space and avoid weirdness.
+
+Also some tweaks to the mock scripts to allow testing of this new URL handling logic.
+
 ## v2.0
 
 ### Template system
