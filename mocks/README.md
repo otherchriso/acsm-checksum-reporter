@@ -46,6 +46,10 @@ Tests the checksum failure template with various scenarios covering different co
 ./mocks/mock_checksum_failure.sh --dry-run --scenario with-url   # With download URL
 ./mocks/mock_checksum_failure.sh --dry-run --scenario with-dlc   # With DLC pack info
 ./mocks/mock_checksum_failure.sh --dry-run --scenario with-notes # With notes field
+./mocks/mock_checksum_failure.sh --dry-run --scenario notes-html-link     # Notes with a named HTML anchor
+./mocks/mock_checksum_failure.sh --dry-run --scenario notes-self-link     # Notes with an HTML anchor whose text is the URL
+./mocks/mock_checksum_failure.sh --dry-run --scenario notes-bare-url      # Notes with a bare URL in text
+./mocks/mock_checksum_failure.sh --dry-run --scenario notes-multiple-urls # Notes with multiple bare URLs
 ./mocks/mock_checksum_failure.sh --dry-run --scenario custom-mod # Custom mod with checksum
 ./mocks/mock_checksum_failure.sh --dry-run --scenario full       # All fields populated
 ```

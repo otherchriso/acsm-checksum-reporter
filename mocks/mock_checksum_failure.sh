@@ -14,6 +14,10 @@ usage() {
   echo "  with-dlc      - Includes DLC pack info"
   echo "  with-oc       - Original game content (no DLC)"
   echo "  with-notes    - Includes notes field"
+  echo "  notes-html-link      - Notes with a named HTML anchor"
+  echo "  notes-self-link      - Notes with an HTML anchor whose text is the URL"
+  echo "  notes-bare-url       - Notes with a bare URL in text"
+  echo "  notes-multiple-urls  - Notes with multiple bare URLs in separate paragraphs"
   echo "  required-file - Non-car/track file (e.g. app or plugin)"
   echo "  custom-mod    - Custom mod with checksum info and known name"
   echo "  full          - All fields populated (default)"
@@ -70,7 +74,7 @@ case "${SCENARIO}" in
     failedFile="content/cars/ks_ferrari_488_gt3/data.acd"
     expectedChecksum=""
     customName=""
-    downloadURL="https://www.racedepartment.com/downloads/example-mod.12345/"
+    downloadURL="https://github.com/otherchriso/acsm-checksum-reporter"
     dlcPack=""
     isOriginalContent=""
     notes=""
@@ -109,10 +113,62 @@ case "${SCENARIO}" in
     failedFile="content/tracks/spa/data/surfaces.ini"
     expectedChecksum=""
     customName=""
-    downloadURL="https://example.com/spa-mod"
+    downloadURL="https://github.com/otherchriso/acsm-checksum-reporter"
     dlcPack=""
     isOriginalContent=""
     notes='<p>This is a custom version of Spa with updated surfaces.</p><p>Make sure to download version 2.1 or later.</p>'
+    ;;
+  notes-html-link)
+    driver="Vincertje"
+    contentType="car"
+    contentName="wsc_legends_porsche_906"
+    requiredFile=""
+    failedFile="content/cars/wsc_legends_porsche_906/data.acd"
+    expectedChecksum=""
+    customName=""
+    downloadURL="https://github.com/otherchriso/acsm-checksum-reporter"
+    dlcPack=""
+    isOriginalContent=""
+    notes='<p>This is version 1.3 of the car, published on January 13 2026. See <a href="https://github.com/otherchriso/acsm-checksum-reporter">the THR website</a> for info on properly obtaining and installing the entire pack.</p>'
+    ;;
+  notes-self-link)
+    driver="Driver Zero"
+    contentType="car"
+    contentName="rss_gt_pack"
+    requiredFile=""
+    failedFile="content/cars/rss_gt_pack/data.acd"
+    expectedChecksum=""
+    customName=""
+    downloadURL=""
+    dlcPack=""
+    isOriginalContent=""
+    notes='<p>Replacement badges and names for the real world cars can be found at <a href="https://github.com/otherchriso/acsm-checksum-reporter" target="_blank">https://github.com/otherchriso/acsm-checksum-reporter</a></p>'
+    ;;
+  notes-bare-url)
+    driver="Driver Zero"
+    contentType="car"
+    contentName="porsche_911_singer"
+    requiredFile=""
+    failedFile="content/cars/porsche_911_singer/data.acd"
+    expectedChecksum=""
+    customName=""
+    downloadURL=""
+    dlcPack=""
+    isOriginalContent=""
+    notes='<p>CSP v0.2.8 or newer required. The car version installed here is currently v1.3.3 per&nbsp;https://github.com/otherchriso/acsm-checksum-reporter</p>'
+    ;;
+  notes-multiple-urls)
+    driver="Falling Falcon"
+    contentType="track"
+    contentName="ablz_targaflorio73"
+    requiredFile=""
+    failedFile="content/tracks/ablz_targaflorio73/ablz_targaflorio73.kn5"
+    expectedChecksum="0ed5b35862b0cdd38facb271ad3d7c0b"
+    customName=""
+    downloadURL=""
+    dlcPack=""
+    isOriginalContent=""
+    notes='<p>LINKS</p><p>Track Targa Florio v0.2.05 from November 2024: https://github.com/otherchriso/acsm-checksum-reporter</p><p>Track practice full layout extension with timing fix (INSTALL MANUALLY): https://github.com/otherchriso/acsm-checksum-reporter</p>'
     ;;
   required-file)
     driver="Driver Zero"
@@ -135,7 +191,7 @@ case "${SCENARIO}" in
     failedFile="apps/python/sol_weather/sol_weather.py"
     expectedChecksum="abc123def456"
     customName="Sol"
-    downloadURL="https://www.racedepartment.com/downloads/sol.24914/"
+    downloadURL="https://github.com/otherchriso/acsm-checksum-reporter"
     dlcPack=""
     isOriginalContent=""
     notes=""
@@ -148,7 +204,7 @@ case "${SCENARIO}" in
     failedFile="content/cars/ks_ferrari_sf70h/data.acd"
     expectedChecksum="deadbeef1234567890"
     customName="Ferrari SF70H Server Pack"
-    downloadURL="https://www.racedepartment.com/downloads/ferrari-sf70h.54321/"
+    downloadURL="https://github.com/otherchriso/acsm-checksum-reporter"
     dlcPack="Ferrari 70th Anniversary"
     isOriginalContent=""
     notes='<p>Updated physics for competitive racing.</p><p>Version must match server exactly.</p>'

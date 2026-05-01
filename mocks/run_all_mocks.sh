@@ -88,6 +88,31 @@ echo ">>> Checksum Failure (with-url)"
 [[ -z "${MODE}" ]] && sleep 1
 echo ""
 
+echo ">>> Checksum Failure (with-notes)"
+"${SCRIPT_DIR}/mock_checksum_failure.sh" ${MODE} --scenario with-notes
+[[ -z "${MODE}" ]] && sleep 1
+echo ""
+
+echo ">>> Checksum Failure (notes-html-link)"
+"${SCRIPT_DIR}/mock_checksum_failure.sh" ${MODE} --scenario notes-html-link
+[[ -z "${MODE}" ]] && sleep 1
+echo ""
+
+echo ">>> Checksum Failure (notes-self-link)"
+"${SCRIPT_DIR}/mock_checksum_failure.sh" ${MODE} --scenario notes-self-link
+[[ -z "${MODE}" ]] && sleep 1
+echo ""
+
+echo ">>> Checksum Failure (notes-bare-url)"
+"${SCRIPT_DIR}/mock_checksum_failure.sh" ${MODE} --scenario notes-bare-url
+[[ -z "${MODE}" ]] && sleep 1
+echo ""
+
+echo ">>> Checksum Failure (notes-multiple-urls)"
+"${SCRIPT_DIR}/mock_checksum_failure.sh" ${MODE} --scenario notes-multiple-urls
+[[ -z "${MODE}" ]] && sleep 1
+echo ""
+
 echo ">>> Checksum Failure (with-dlc)" 
 "${SCRIPT_DIR}/mock_checksum_failure.sh" ${MODE} --scenario with-dlc
 [[ -z "${MODE}" ]] && sleep 1

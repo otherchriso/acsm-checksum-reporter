@@ -509,6 +509,9 @@ prepare_checksum_message() {
     | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' \
     | cat -s)
 
+  # Wrap remaining bare URLs to suppress Discord link previews.
+  notes=$(echo "${notes}" | perl -pe 's{(?<!<)\b(https?://[^\s<>()"\x27]+)}{my $url = $1; my $trailing = ""; while ($url =~ s/([.,;:!?]+)\z//) { $trailing = $1 . $trailing; } "<$url>$trailing"}eg')
+
   # Strip notes that are effectively empty (null, whitespace, stray newline escapes)
   local notes_stripped=$(echo "${notes}" | xargs)
   [[ -z "${notes_stripped}" ]] && notes=""
