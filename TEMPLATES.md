@@ -100,7 +100,7 @@ Useful for shared content like footers or disclaimers. By convention, partial te
 
 | File | Event | Key Variables |
 |------|-------|---------------|
-| `checksum_failure.tmpl` | Player kicked for checksum mismatch | `driver`, `contentType`, `contentName`, `failedFile`, `expectedChecksum`, `customName`, `downloadURL`, `dlcPack`, `notes` |
+| `checksum_failure.tmpl` | Player kicked for checksum mismatch | `driver`, `serverName`, `contentType`, `contentName`, `failedFile`, `expectedChecksum`, `customName`, `downloadURL`, `dlcPack`, `notes` |
 | `session_closed.tmpl` | Player rejected (session closed) | `driver` |
 | `no_slots.tmpl` | Player rejected (no available slots) | `driver` |
 | `plugin_kick.tmpl` | Player kicked by UDP plugin | `driver` |
@@ -116,6 +116,7 @@ Useful for shared content like footers or disclaimers. By convention, partial te
 | Variable | Description |
 |----------|-------------|
 | `{{ .driver }}` | Driver name |
+| `{{ .serverName }}` | ACSM server display name from `store.json/server_options.json`, falling back to the server directory name. Bare URLs are wrapped in `< >` to suppress Discord previews. |
 
 ### Checksum Failure Only
 

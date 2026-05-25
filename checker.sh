@@ -45,6 +45,11 @@ announce_ping_kicks="${announce_ping_kicks:-true}"
 announce_idle_kicks="${announce_idle_kicks:-true}"
 announce_no_join_list="${announce_no_join_list:-true}"
 
+wrap_discord_urls() {
+  local input="${1}"
+  printf '%s' "${input}" | perl -pe 's{(?<!<)\b(https?://[^\s<>()"\x27]+)}{my $url = $1; my $trailing = ""; while ($url =~ s/([.,;:!?]+)\z//) { $trailing = $1 . $trailing; } "<$url>$trailing"}eg'
+}
+
 # Validate required environment variables
 if [[ -z "${contentpath}" ]]; then
   echo "Error: contentpath is not set in checksum.env." >&2
@@ -73,6 +78,18 @@ watchedlog="${1}"
 # e.g. /opt/acsm/server/servers/SERVER_00/assetto/logs/session/latest.log -> SERVER_00
 server_name=$(echo "${watchedlog}" | grep -oP 'servers/\K[^/]+')
 server_name="${server_name:-unknown}"
+
+# Look up the configured ACSM display name for this server, falling back to the
+# directory name when the server options file is unavailable.
+server_display_name=""
+if [[ -n "${serverspath:-}" && "${server_name}" != "unknown" ]]; then
+  server_options_file="${serverspath%/}/${server_name}/store.json/server_options.json"
+  if [[ -f "${server_options_file}" ]]; then
+    server_display_name=$(jq -r '.Name // empty | select(type == "string" and length > 0)' "${server_options_file}" 2>/dev/null | head -n 1)
+  fi
+fi
+server_display_name="${server_display_name:-${server_name}}"
+server_display_name=$(wrap_discord_urls "${server_display_name}")
 
 # Structured log helpers
 log_info() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] [INFO] [${server_name}] $*" >&2; }
@@ -270,6 +287,12 @@ render_template() {
   declare -A vars
   local var_list=""
   local var_values=""
+  if [[ -n "${server_display_name:-}" ]]; then
+    vars["serverName"]="${server_display_name}"
+    var_list="${var_list}serverName,"
+    local escaped_value=$(echo "${server_display_name}" | sed 's/|/\\|/g')
+    var_values="${var_values}serverName=${escaped_value}|"
+  fi
   for arg in "$@"; do
     local key="${arg%%=*}"
     local value="${arg#*=}"
@@ -510,7 +533,7 @@ prepare_checksum_message() {
     | cat -s)
 
   # Wrap remaining bare URLs to suppress Discord link previews.
-  notes=$(echo "${notes}" | perl -pe 's{(?<!<)\b(https?://[^\s<>()"\x27]+)}{my $url = $1; my $trailing = ""; while ($url =~ s/([.,;:!?]+)\z//) { $trailing = $1 . $trailing; } "<$url>$trailing"}eg')
+  notes=$(wrap_discord_urls "${notes}")
 
   # Strip notes that are effectively empty (null, whitespace, stray newline escapes)
   local notes_stripped=$(echo "${notes}" | xargs)

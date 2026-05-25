@@ -83,6 +83,11 @@ echo ">>> Checksum Failure (minimal)"
 [[ -z "${MODE}" ]] && sleep 1
 echo ""
 
+echo ">>> Checksum Failure (server-name-url)"
+server_display_name="Mock Server https://github.com/otherchriso/acsm-checksum-reporter" "${SCRIPT_DIR}/mock_checksum_failure.sh" ${MODE} --scenario minimal
+[[ -z "${MODE}" ]] && sleep 1
+echo ""
+
 echo ">>> Checksum Failure (with-url)"
 "${SCRIPT_DIR}/mock_checksum_failure.sh" ${MODE} --scenario with-url
 [[ -z "${MODE}" ]] && sleep 1

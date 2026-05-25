@@ -18,6 +18,11 @@ if ! command -v curl &> /dev/null; then
   exit 1
 fi
 
+if ! command -v perl &> /dev/null; then
+  echo "Error: perl is required but not installed." >&2
+  exit 1
+fi
+
 # Check required config files
 if [[ ! -f checksum.env ]]; then
   echo "Error: checksum.env not found." >&2
@@ -32,6 +37,11 @@ fi
 source checksum.env
 source .secrets
 
+wrap_discord_urls() {
+  local input="${1}"
+  printf '%s' "${input}" | perl -pe 's{(?<!<)\b(https?://[^\s<>()"\x27]+)}{my $url = $1; my $trailing = ""; while ($url =~ s/([.,;:!?]+)\z//) { $trailing = $1 . $trailing; } "<$url>$trailing"}eg'
+}
+
 # Validate required environment variables
 if [[ -z "${bot_name}" ]]; then
   echo "Error: bot_name is not set in checksum.env." >&2
@@ -45,6 +55,7 @@ fi
 
 # Template directory (default: ./templates)
 templates_path="${templates_path:-./templates}"
+server_display_name=$(wrap_discord_urls "${server_display_name:-Mock Server}")
 
 # Default values for legacy fallback mode
 message_prefix="${message_prefix:-:racing_car: :police_car: :racing_car: :police_car: :racing_car: :police_car:\n}"
@@ -95,6 +106,12 @@ render_template() {
   declare -A vars
   local var_list=""
   local var_values=""
+  if [[ -n "${server_display_name:-}" ]]; then
+    vars["serverName"]="${server_display_name}"
+    var_list="${var_list}serverName,"
+    local escaped_value=$(echo "${server_display_name}" | sed 's/|/\\|/g')
+    var_values="${var_values}serverName=${escaped_value}|"
+  fi
   for arg in "$@"; do
     local key="${arg%%=*}"
     local value="${arg#*=}"
@@ -231,7 +248,7 @@ parse_notes() {
     | cat -s)
 
   # Wrap remaining bare URLs to suppress Discord link previews.
-  notes=$(echo "${notes}" | perl -pe 's{(?<!<)\b(https?://[^\s<>()"\x27]+)}{my $url = $1; my $trailing = ""; while ($url =~ s/([.,;:!?]+)\z//) { $trailing = $1 . $trailing; } "<$url>$trailing"}eg')
+  notes=$(wrap_discord_urls "${notes}")
 
   # Strip notes that are effectively empty
   local notes_stripped=$(echo "${notes}" | xargs)
