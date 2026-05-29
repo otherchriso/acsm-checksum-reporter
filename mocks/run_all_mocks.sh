@@ -48,6 +48,10 @@ echo "========================================"
 echo ""
 
 # Run each mock
+echo ">>> Detection Pipeline"
+"${SCRIPT_DIR}/mock_detection.sh"
+echo ""
+
 echo ">>> Plugin Kick"
 "${SCRIPT_DIR}/mock_plugin_kick.sh" ${MODE}
 [[ -z "${MODE}" ]] && sleep 1
@@ -80,6 +84,11 @@ echo ""
 
 echo ">>> Checksum Failure (minimal)"
 "${SCRIPT_DIR}/mock_checksum_failure.sh" ${MODE} --scenario minimal
+[[ -z "${MODE}" ]] && sleep 1
+echo ""
+
+echo ">>> Checksum Failure (unknown)"
+"${SCRIPT_DIR}/mock_checksum_failure.sh" ${MODE} --scenario unknown
 [[ -z "${MODE}" ]] && sleep 1
 echo ""
 

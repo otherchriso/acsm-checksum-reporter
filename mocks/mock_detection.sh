@@ -22,6 +22,10 @@ LOG_LINES[checksum_kick]='time="2026-02-07T08:10:35+10:00" level=info msg="Kicki
 LOG_LINES[checksum_kick_app_warn]='time="2026-02-07T09:46:20+10:00" level=warning msg="Car: 1 failed checksum on file '\''apps/python/sol_weather/sol_weather.py'\''. Kicking from server."'
 LOG_LINES[checksum_kick_app]='time="2026-02-07T09:46:20+10:00" level=info msg="Kicking: CarID: 1, Name: Driver Zero, GUID: 76561100000000001, Model: lotus_evora_gtc, reason: Checksum failed"'
 
+LOG_LINES[checksum_interleaved_warn]='time="2026-05-29T22:48:47Z" level=warning msg="Car: 3 failed checksum on file '\''content/tracks/jr_road_atlanta_2022/drift/data/surfaces.ini'\''. Kicking from server."'
+LOG_LINES[checksum_interleaved_chat]='time="2026-05-29T22:48:47Z" level=info msg="Broadcast Chat from Car 3 (Driver Three): RP: App not active"'
+LOG_LINES[checksum_interleaved_kick]='time="2026-05-29T22:48:47Z" level=info msg="Kicking: CarID: 3, Name: Driver Three, GUID: 76561100000000003, Model: ks_porsche_911_rsr_2017, reason: Checksum failed"'
+
 LOG_LINES[session_closed]='time="2026-02-05T20:30:15+10:00" level=info msg="Driver: Alex Turner (76561100000000002) tried to join but was rejected as current session is closed"'
 
 LOG_LINES[no_slots]='time="2026-02-05T20:31:02+10:00" level=info msg="Could not connect driver (Sam Wilson/76561100000000003) to car. no available slots for this GUID"'
@@ -106,6 +110,53 @@ if [[ "${driver}" == "Driver Zero" && ! "${failedpath}" =~ ^content/(cars|tracks
   fi
 else
   echo "FAIL: checksum_kick_app extraction -> driver='${driver}' path='${failedpath}' (expected non-content path)"
+  ((FAIL++))
+fi
+
+echo ""
+echo "--- Checksum Warning Buffer Tests ---"
+echo ""
+
+declare -A pending_checksum_warnings
+linebefore=""
+buffered_warningline=""
+buffered_failedpath=""
+buffered_contenttype=""
+buffered_contentname=""
+for line in "${LOG_LINES[checksum_interleaved_warn]}" "${LOG_LINES[checksum_interleaved_chat]}" "${LOG_LINES[checksum_interleaved_kick]}"; do
+  if [[ $(echo "${line}" | egrep -c "failed checksum on file") -gt 0 ]]; then
+    checksum_car_id=$(echo "${line}" | sed -n 's/.*Car: \([0-9][0-9]*\) failed checksum.*/\1/p')
+    if [[ -n "${checksum_car_id}" ]]; then
+      pending_checksum_warnings["${checksum_car_id}"]="${line}"
+    fi
+  fi
+
+  if [[ $(echo "${line}" | egrep -c 'Kicking.*Checksum failed') -gt 0 ]]; then
+    kick_car_id=$(echo "${line}" | sed -n 's/.*CarID: \([0-9][0-9]*\),.*/\1/p')
+    buffered_warningline="${linebefore}"
+    if [[ -n "${kick_car_id}" && -n "${pending_checksum_warnings[${kick_car_id}]:-}" ]]; then
+      buffered_warningline="${pending_checksum_warnings[${kick_car_id}]}"
+      unset "pending_checksum_warnings[${kick_car_id}]"
+    fi
+
+    buffered_failedpath=$(echo "${buffered_warningline}" | sed -n "s/.*on file '\([^']*\)'.*/\1/p")
+    if [[ "${buffered_failedpath}" =~ ^content/cars/ ]]; then
+      buffered_contenttype="car"
+      buffered_contentname=$(echo "${buffered_failedpath}" | awk -F'/' '{print $3}')
+    elif [[ "${buffered_failedpath}" =~ ^content/tracks/ ]]; then
+      buffered_contenttype="track"
+      buffered_contentname=$(echo "${buffered_failedpath}" | awk -F'/' '{print $3}')
+    fi
+  fi
+
+  linebefore="${line}"
+done
+
+if [[ "${buffered_warningline}" == "${LOG_LINES[checksum_interleaved_warn]}" && "${buffered_failedpath}" == "content/tracks/jr_road_atlanta_2022/drift/data/surfaces.ini" && "${buffered_contenttype}" == "track" && "${buffered_contentname}" == "jr_road_atlanta_2022" ]]; then
+  echo "PASS: checksum_interleaved pairing -> path='${buffered_failedpath}' content='${buffered_contenttype}/${buffered_contentname}'"
+  ((PASS++))
+else
+  echo "FAIL: checksum_interleaved pairing -> warning='${buffered_warningline}' path='${buffered_failedpath}' content='${buffered_contenttype}/${buffered_contentname}'"
   ((FAIL++))
 fi
 

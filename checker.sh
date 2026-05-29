@@ -754,6 +754,8 @@ if [[ -n "${suppressed}" ]]; then
   log_info "suppressed announcements:${suppressed}"
 fi
 
+declare -A pending_checksum_warnings
+
 tail -Fn0 "${watchedlog}" 2>&1 | \
 while read -r line; do
 
@@ -763,10 +765,24 @@ while read -r line; do
 
   message=""
 
+  if [[ $(echo "${line}" | egrep -c "failed checksum on file") -gt 0 ]]; then
+    checksum_car_id=$(echo "${line}" | sed -n 's/.*Car: \([0-9][0-9]*\) failed checksum.*/\1/p')
+    if [[ -n "${checksum_car_id}" ]]; then
+      pending_checksum_warnings["${checksum_car_id}"]="${line}"
+    fi
+  fi
+
   # Detection: Checksum validation failure
   # The warning line (linebefore) has the file path, the Kicking line has driver/GUID
   if [[ $(echo "${line}" | egrep -c 'Kicking.*Checksum failed') -gt 0 ]]; then
-    result=$(prepare_checksum_message "${linebefore}" "${line}")
+    kick_car_id=$(echo "${line}" | sed -n 's/.*CarID: \([0-9][0-9]*\),.*/\1/p')
+    warningline="${linebefore}"
+    if [[ -n "${kick_car_id}" && -n "${pending_checksum_warnings[${kick_car_id}]:-}" ]]; then
+      warningline="${pending_checksum_warnings[${kick_car_id}]}"
+      unset "pending_checksum_warnings[${kick_car_id}]"
+    fi
+
+    result=$(prepare_checksum_message "${warningline}" "${line}")
     message="${result%|*}"
     context="${result#*|}"
     guid=$(echo "${line}" | grep -oP 'GUID: \K[0-9]+')
