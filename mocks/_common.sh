@@ -61,6 +61,13 @@ server_display_name=$(wrap_discord_urls "${server_display_name:-Mock Server}")
 message_prefix="${message_prefix:-:racing_car: :police_car: :racing_car: :police_car: :racing_car: :police_car:\n}"
 message_suffix="${message_suffix:-}"
 
+# Discord Component V2 layout toggle. When enabled, rendered template content is
+# wrapped in a Container component instead of sent as traditional message content.
+use_component_layouts="${use_component_layouts:-false}"
+component_accent_color="${component_accent_color:-16731471}"
+component_separator_1_token="%%ACSM_COMPONENT_SEPARATOR_1%%"
+component_separator_2_token="%%ACSM_COMPONENT_SEPARATOR_2%%"
+
 # Render a template with variable substitution and conditional blocks
 # Arguments: $1 = template name (without .tmpl extension)
 #            Remaining args: key=value pairs for variables
@@ -106,6 +113,14 @@ render_template() {
   declare -A vars
   local var_list=""
   local var_values=""
+  vars["separator-1"]=""
+  vars["separator-2"]=""
+  if [[ "${use_component_layouts}" == "true" ]]; then
+    vars["separator-1"]="${component_separator_1_token}"
+    vars["separator-2"]="${component_separator_2_token}"
+    var_list="${var_list}separator-1,separator-2,"
+    var_values="${var_values}separator-1=${component_separator_1_token}|separator-2=${component_separator_2_token}|"
+  fi
   if [[ -n "${server_display_name:-}" ]]; then
     vars["serverName"]="${server_display_name}"
     var_list="${var_list}serverName,"
@@ -212,6 +227,108 @@ escape_for_json() {
   echo "${escaped}"
 }
 
+resolve_component_accent_color() {
+  local color="${component_accent_color:-16731471}"
+  local numeric
+
+  if [[ "${color,,}" == "random" ]]; then
+    random_component_accent_color
+    return
+  fi
+
+  if [[ "${color}" =~ ^0[xX][0-9a-fA-F]{1,6}$ ]]; then
+    numeric=$((color))
+  elif [[ "${color}" =~ ^[0-9]+$ ]]; then
+    numeric=$((10#${color}))
+  else
+    echo "16731471"
+    return
+  fi
+
+  if (( numeric >= 0 && numeric <= 16777215 )); then
+    echo "${numeric}"
+  else
+    echo "16731471"
+  fi
+}
+
+random_component_accent_color() {
+  local red
+  local green
+  local blue
+
+  while true; do
+    red=$((RANDOM % 256))
+    green=$((RANDOM % 256))
+    blue=$((RANDOM % 256))
+
+    if ! (( red < 0x4f && green < 0x4f && blue < 0x4f )); then
+      echo $(((red << 16) + (green << 8) + blue))
+      return
+    fi
+  done
+}
+
+append_query_param() {
+  local url="${1}"
+  local param="${2}"
+
+  if [[ "${url}" == *\?* ]]; then
+    echo "${url}&${param}"
+  else
+    echo "${url}?${param}"
+  fi
+}
+
+build_component_payload() {
+  local message="${1}"
+  local accent_color
+  accent_color=$(resolve_component_accent_color)
+
+  jq -n \
+    --arg username "${bot_name}" \
+    --arg body "${message}" \
+    --arg separator_1 "${component_separator_1_token}" \
+    --arg separator_2 "${component_separator_2_token}" \
+    --argjson accent_color "${accent_color}" \
+    '
+    def text_component($content):
+      if (($content | gsub("^[[:space:]]+|[[:space:]]+$"; "") | length) > 0)
+      then [{type: 10, content: $content}]
+      else []
+      end;
+
+    def component_parts($text):
+      ($text | index($separator_1)) as $index_1
+      | ($text | index($separator_2)) as $index_2
+      | if $index_1 == null and $index_2 == null then
+          text_component($text)
+        elif $index_2 == null or ($index_1 != null and $index_1 < $index_2) then
+          text_component($text[0:$index_1])
+          + [{type: 14, divider: true, spacing: 1}]
+          + component_parts($text[($index_1 + ($separator_1 | length)):])
+        else
+          text_component($text[0:$index_2])
+          + [{type: 14, divider: true, spacing: 2}]
+          + component_parts($text[($index_2 + ($separator_2 | length)):])
+        end;
+
+    {
+      username: $username,
+      flags: 32768,
+      components: [
+        {
+          type: 17,
+          accent_color: $accent_color,
+          components: (
+            component_parts($body)
+            | if length > 0 then . else [{type: 10, content: "\u200b"}] end
+          )
+        }
+      ]
+    }'
+}
+
 # Parse HTML notes into Discord-friendly plain text
 # Mirrors the pipeline in checker.sh's prepare_checksum_message()
 # Arguments: $1 = raw HTML notes string
@@ -262,19 +379,26 @@ parse_notes() {
 send_webhook() {
   local message="${1}"
   local context="${2}"
-  
-  # Escape message content for JSON
-  local escaped_message=$(escape_for_json "${message}")
-  local escaped_bot_name=$(escape_for_json "${bot_name}")
-  
-  local payload='{"username": "'"${escaped_bot_name}"'", "content": "'"${escaped_message}"'"}'
+
+  local payload
+  local webhook_target="${webhookurl}"
+  if [[ "${use_component_layouts}" == "true" ]]; then
+    payload=$(build_component_payload "${message}")
+    webhook_target=$(append_query_param "${webhook_target}" "with_components=true")
+  else
+    # Escape message content for JSON
+    local escaped_message=$(escape_for_json "${message}")
+    local escaped_bot_name=$(escape_for_json "${bot_name}")
+
+    payload='{"username": "'"${escaped_bot_name}"'", "content": "'"${escaped_message}"'"}'
+  fi
 
   if [[ -n "${message}" ]]; then
     echo "=== Sending webhook for: ${context} ===" >&2
     echo "Payload preview:" >&2
     echo "${message}" >&2
     echo "===" >&2
-    if ! curl -sf -H "Content-Type: application/json" -d "${payload}" "${webhookurl}"; then
+    if ! curl -sf -H "Content-Type: application/json" -d "${payload}" "${webhook_target}"; then
       echo "Warning: Failed to send webhook notification for ${context}" >&2
       return 1
     fi
@@ -289,9 +413,16 @@ dry_run_webhook() {
   local context="${2}"
   
   echo "=== DRY RUN: ${context} ===" 
-  echo "Would send the following message:"
-  echo "---"
-  echo -e "${message}"
-  echo "---"
+  if [[ "${use_component_layouts}" == "true" ]]; then
+    echo "Would send the following Component V2 payload:"
+    echo "---"
+    build_component_payload "${message}"
+    echo "---"
+  else
+    echo "Would send the following message:"
+    echo "---"
+    echo -e "${message}"
+    echo "---"
+  fi
   echo ""
 }

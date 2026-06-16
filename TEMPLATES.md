@@ -117,6 +117,8 @@ Useful for shared content like footers or disclaimers. By convention, partial te
 |----------|-------------|
 | `{{ .driver }}` | Driver name |
 | `{{ .serverName }}` | ACSM server display name from `store.json/server_options.json`, falling back to the server directory name. Bare URLs are wrapped in `< >` to suppress Discord previews. |
+| `{{ .separator-1 }}` | Optional Component V2 separator marker with small padding. When `use_component_layouts=true`, this becomes a Discord Separator component with `spacing: 1`. When component layouts are disabled, it renders as empty text. |
+| `{{ .separator-2 }}` | Optional Component V2 separator marker with large padding. When `use_component_layouts=true`, this becomes a Discord Separator component with `spacing: 2`. When component layouts are disabled, it renders as empty text. |
 
 ### Checksum Failure Only
 
@@ -152,6 +154,24 @@ Wir haben keinen Download-Link. Falls es sich um Standard- oder DLC-Inhalte hand
 ## Validation
 
 Templates are validated when `checker.sh` starts. Errors are logged but won't prevent the script from running—it will fall back to a basic message format if a template fails.
+
+## Component V2 Layouts
+
+Set `use_component_layouts=true` in `checksum.env` to send rendered templates inside Discord Component V2 Container components instead of traditional message `content`.
+
+The template body does not need to change. The same Markdown content is rendered first, then wrapped at send time. You can restart the bot with `use_component_layouts=false` to return to the legacy content payload.
+
+To add real Component V2 dividers without breaking legacy mode, place `{{ .separator-1 }}` or `{{ .separator-2 }}` where a visual divider should appear:
+
+```
+{{ include "_header.tmpl" }}
+{{ .separator-2 }}
+Checksum failed for **{{ .driver }}**
+```
+
+With component layouts enabled, those markers become Discord Separator components. `{{ .separator-1 }}` compiles to `spacing: 1` and `{{ .separator-2 }}` compiles to `spacing: 2`. With component layouts disabled, they disappear.
+
+The container accent colour can be customised with `component_accent_color` in decimal or hex form, for example `component_accent_color=0xff4d4f`. Set `component_accent_color=random` to choose a new accent colour for each sent webhook. Random accents exclude colours where all three RGB channels are below `0x4f`, which avoids very dark container bars.
 
 Validation checks for:
 - Unbalanced `{{ }}` braces

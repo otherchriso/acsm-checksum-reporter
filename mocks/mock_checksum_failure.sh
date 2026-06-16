@@ -182,7 +182,7 @@ case "${SCENARIO}" in
     downloadURL=""
     dlcPack=""
     isOriginalContent=""
-    notes='<p>LINKS</p><p>Track Targa Florio v0.2.05 from November 2024: https://github.com/otherchriso/acsm-checksum-reporter</p><p>Track practice full layout extension with timing fix (INSTALL MANUALLY): https://github.com/otherchriso/acsm-checksum-reporter</p>'
+    notes='<p>Track Targa Florio v0.2.05 from November 2024: https://github.com/otherchriso/acsm-checksum-reporter</p><p>Track practice full layout extension with timing fix (INSTALL MANUALLY): https://github.com/otherchriso/acsm-checksum-reporter</p>'
     ;;
   required-file)
     driver="Driver Zero"

@@ -1,23 +1,44 @@
 {{ include "_header.tmpl" }}
-
+## :octagonal_sign: Checksum Failure
 {{ if .customName }}
-Checksum failed for **{{ .driver }}** on required app **{{ .customName }}**
+For **{{ .driver }}** on required app **{{ .customName }}**
 {{ else }}
 {{ if .requiredFile }}
-Checksum failed for **{{ .driver }}** on required file **{{ .requiredFile }}**
+For **{{ .driver }}** on required file **{{ .requiredFile }}**
 {{ else }}
 {{ if .contentName }}
-Checksum failed for **{{ .driver }}** on {{ .contentType }} **{{ .contentName }}**
+For **{{ .driver }}** on {{ .contentType }} **{{ .contentName }}**
 {{ else }}
-Checksum failed for **{{ .driver }}**
+For **{{ .driver }}**
 {{ end }}
 {{ end }}
 {{ end }}
 {{ if .failedFile }}
 
 :file_folder: **Specifically:** `{{ .failedFile }}`
-{{ if .expectedChecksum }} :hash: **Expected checksum:** `{{ .expectedChecksum }}` {{ end }}
+{{ if .expectedChecksum }}:hash: **Expected checksum:** `{{ .expectedChecksum }}` {{ end }}
 {{ end }}
+
+{{ if .dlcPack }}
+{{ .separator-2 }}
+### Hints
+{{ else }}
+{{ if .isOriginalContent }}
+{{ .separator-2 }}
+### Hints
+{{ else }}
+{{ if .downloadURL }}
+{{ .separator-2 }}
+### Hints
+{{ else }}
+{{ if .notes }}
+{{ .separator-2 }}
+### Hints
+{{ end }}
+{{ end }}
+{{ end }}
+{{ end }}
+
 {{ if .dlcPack }}
 
 :package: {{ .contentName }} is available with the **{{ .dlcPack }}** DLC. Consider validating your game through Steam to reset any altered files.

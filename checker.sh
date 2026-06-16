@@ -45,6 +45,13 @@ announce_ping_kicks="${announce_ping_kicks:-true}"
 announce_idle_kicks="${announce_idle_kicks:-true}"
 announce_no_join_list="${announce_no_join_list:-true}"
 
+# Discord Component V2 layout toggle. When enabled, rendered template content is
+# wrapped in a Container component instead of sent as traditional message content.
+use_component_layouts="${use_component_layouts:-false}"
+component_accent_color="${component_accent_color:-16731471}"
+component_separator_1_token="%%ACSM_COMPONENT_SEPARATOR_1%%"
+component_separator_2_token="%%ACSM_COMPONENT_SEPARATOR_2%%"
+
 wrap_discord_urls() {
   local input="${1}"
   printf '%s' "${input}" | perl -pe 's{(?<!<)\b(https?://[^\s<>()"\x27]+)}{my $url = $1; my $trailing = ""; while ($url =~ s/([.,;:!?]+)\z//) { $trailing = $1 . $trailing; } "<$url>$trailing"}eg'
@@ -287,6 +294,14 @@ render_template() {
   declare -A vars
   local var_list=""
   local var_values=""
+  vars["separator-1"]=""
+  vars["separator-2"]=""
+  if [[ "${use_component_layouts}" == "true" ]]; then
+    vars["separator-1"]="${component_separator_1_token}"
+    vars["separator-2"]="${component_separator_2_token}"
+    var_list="${var_list}separator-1,separator-2,"
+    var_values="${var_values}separator-1=${component_separator_1_token}|separator-2=${component_separator_2_token}|"
+  fi
   if [[ -n "${server_display_name:-}" ]]; then
     vars["serverName"]="${server_display_name}"
     var_list="${var_list}serverName,"
@@ -409,6 +424,108 @@ get_announce_toggle() {
   esac
 }
 
+resolve_component_accent_color() {
+  local color="${component_accent_color:-16731471}"
+  local numeric
+
+  if [[ "${color,,}" == "random" ]]; then
+    random_component_accent_color
+    return
+  fi
+
+  if [[ "${color}" =~ ^0[xX][0-9a-fA-F]{1,6}$ ]]; then
+    numeric=$((color))
+  elif [[ "${color}" =~ ^[0-9]+$ ]]; then
+    numeric=$((10#${color}))
+  else
+    echo "16731471"
+    return
+  fi
+
+  if (( numeric >= 0 && numeric <= 16777215 )); then
+    echo "${numeric}"
+  else
+    echo "16731471"
+  fi
+}
+
+random_component_accent_color() {
+  local red
+  local green
+  local blue
+
+  while true; do
+    red=$((RANDOM % 256))
+    green=$((RANDOM % 256))
+    blue=$((RANDOM % 256))
+
+    if ! (( red < 0x4f && green < 0x4f && blue < 0x4f )); then
+      echo $(((red << 16) + (green << 8) + blue))
+      return
+    fi
+  done
+}
+
+append_query_param() {
+  local url="${1}"
+  local param="${2}"
+
+  if [[ "${url}" == *\?* ]]; then
+    echo "${url}&${param}"
+  else
+    echo "${url}?${param}"
+  fi
+}
+
+build_component_payload() {
+  local message="${1}"
+  local accent_color
+  accent_color=$(resolve_component_accent_color)
+
+  jq -n \
+    --arg username "${bot_name}" \
+    --arg body "${message}" \
+    --arg separator_1 "${component_separator_1_token}" \
+    --arg separator_2 "${component_separator_2_token}" \
+    --argjson accent_color "${accent_color}" \
+    '
+    def text_component($content):
+      if (($content | gsub("^[[:space:]]+|[[:space:]]+$"; "") | length) > 0)
+      then [{type: 10, content: $content}]
+      else []
+      end;
+
+    def component_parts($text):
+      ($text | index($separator_1)) as $index_1
+      | ($text | index($separator_2)) as $index_2
+      | if $index_1 == null and $index_2 == null then
+          text_component($text)
+        elif $index_2 == null or ($index_1 != null and $index_1 < $index_2) then
+          text_component($text[0:$index_1])
+          + [{type: 14, divider: true, spacing: 1}]
+          + component_parts($text[($index_1 + ($separator_1 | length)):])
+        else
+          text_component($text[0:$index_2])
+          + [{type: 14, divider: true, spacing: 2}]
+          + component_parts($text[($index_2 + ($separator_2 | length)):])
+        end;
+
+    {
+      username: $username,
+      flags: 32768,
+      components: [
+        {
+          type: 17,
+          accent_color: $accent_color,
+          components: (
+            component_parts($body)
+            | if length > 0 then . else [{type: 10, content: "\u200b"}] end
+          )
+        }
+      ]
+    }'
+}
+
 # Send a message to the Discord webhook
 # Arguments: $1 = message, $2 = context for error logging, $3 = trigger name, $4 = GUID (optional)
 send_webhook() {
@@ -431,14 +548,21 @@ send_webhook() {
     return
   fi
 
-  # Escape message content for JSON
-  local escaped_message=$(escape_for_json "${message}")
-  local escaped_bot_name=$(escape_for_json "${bot_name}")
-  
-  local payload='{"username": "'"${escaped_bot_name}"'", "content": "'"${escaped_message}"'"}'
+  local payload
+  local webhook_target="${webhookurl}"
+  if [[ "${use_component_layouts}" == "true" ]]; then
+    payload=$(build_component_payload "${message}")
+    webhook_target=$(append_query_param "${webhook_target}" "with_components=true")
+  else
+    # Escape message content for JSON
+    local escaped_message=$(escape_for_json "${message}")
+    local escaped_bot_name=$(escape_for_json "${bot_name}")
+
+    payload='{"username": "'"${escaped_bot_name}"'", "content": "'"${escaped_message}"'"}'
+  fi
 
   local http_status
-  http_status=$(curl -s -o /dev/null -w "%{http_code}" -H "Content-Type: application/json" -d "${payload}" "${webhookurl}")
+  http_status=$(curl -s -o /dev/null -w "%{http_code}" -H "Content-Type: application/json" -d "${payload}" "${webhook_target}")
   if [[ "${http_status}" =~ ^2 ]]; then
     log_info "trigger=${trigger} driver=\"${context}\"${guid_field} status=${http_status} result=sent"
   else
@@ -752,6 +876,10 @@ suppressed=""
 [[ "${announce_no_join_list}" != "true" ]]      && suppressed="${suppressed} no_join_list"
 if [[ -n "${suppressed}" ]]; then
   log_info "suppressed announcements:${suppressed}"
+fi
+
+if [[ "${use_component_layouts}" == "true" ]]; then
+  log_info "component layouts enabled accent_color=${component_accent_color}"
 fi
 
 declare -A pending_checksum_warnings
