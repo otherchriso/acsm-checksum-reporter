@@ -4,8 +4,8 @@ This repo is a set of scripts which solves the following primary use case:
 
 When someone joins an [Assetto Corsa Server Manager](https://emperorservers.com/products/assetto-corsa-server-manager) server and receives a checksum failure, a message telling everyone the name of the driver and the cause of the checksum failure is sent to a specific Discord server via webhook.
 
+<img width="1223" height="787" alt="example screenshot of a checksum failure message (version 2.2+)" src="https://github.com/user-attachments/assets/94c5a3dd-1247-4a7d-a577-dc042693cc0e" />
 
-![example](https://user-images.githubusercontent.com/77416784/189126614-e4ae5e0d-c53f-4432-8caf-4c618ea190cd.png)
 
 The system will also detect and report similar connection failures:
 * **Session closed**<br>("No join" or "Free join until 20 seconds to the green light")
